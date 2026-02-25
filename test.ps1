@@ -1,10 +1,8 @@
 <#
 .SYNOPSIS
-    Windows 11 Ersteinrichtungs-Skript
+    Windows 11 Ersteinrichtungs-Skript (Cloud-Version)
 .DESCRIPTION
-    Fuehrt Basis-Einstellungen fuer Windows 11 aus: Zeit-Sync, BitLocker deaktivieren,
-    Registry-Anpassungen (Widgets, Taskleiste), Autostart-Bereinigung, Bloatware-Entfernung
-    und interaktive App-Installation via Winget.
+    Fuehrt Basis-Einstellungen fuer Windows 11 aus. Optimiert fuer 'irm | iex'.
 #>
 
 # ==========================================
@@ -16,13 +14,14 @@ function Write-ErrorMsg { param([string]$Message) Write-Host "[-] $Message" -For
 function Write-Warn { param([string]$Message) Write-Host "[!] $Message" -ForegroundColor Yellow }
 
 # ==========================================
-# 1. Admin-Rechte & Internet-Check
+# 1. Admin-Rechte & Internet-Check (CLOUD OPTIMIERT)
 # ==========================================
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
 if (-not $isAdmin) {
-    Write-Warn "Keine Administratorrechte erkannt. Starte Skript neu als Administrator..."
-    Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+    Write-ErrorMsg "FEHLER: Keine Administratorrechte erkannt!"
+    Write-Warn "Da dieses Skript direkt aus dem Internet laeuft, kann es sich nicht selbst als Admin neustarten."
+    Write-Warn "Bitte schliesse dieses Fenster, druecke 'Start', tippe 'PowerShell', waehle 'Als Administrator ausfuehren' und fuege den Befehl erneut ein."
     exit
 }
 
@@ -80,7 +79,6 @@ try {
 # ==========================================
 Write-Info "Wende Windows 11 Registry-Anpassungen an..."
 
-# 3.1 Unnoetige Taskleisten-Systemsymbole deaktivieren
 try {
     $regPathAdvanced = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
     Set-ItemProperty -Path $regPathAdvanced -Name "TaskbarDa" -Value 0 -Type DWord -ErrorAction SilentlyContinue
@@ -96,7 +94,6 @@ try {
     Write-ErrorMsg "Fehler beim Deaktivieren der Taskleisten-Icons."
 }
 
-# 3.2 Benachrichtigungen komplett ausschalten
 try {
     $cdmPath = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
     if (-not (Test-Path $cdmPath)) { New-Item -Path $cdmPath -Force | Out-Null }
@@ -114,7 +111,6 @@ try {
     Write-ErrorMsg "Fehler beim Deaktivieren der Benachrichtigungen."
 }
 
-# 3.3 Autostart-Apps deaktivieren
 Write-Info "Deaktiviere klassische User-Programme aus dem Autostart..."
 $startupAppsToDisable = @("OneDrive", "OneDriveSetup", "Teams", "com.squirrel.Teams.Teams", "MicrosoftEdgeAutoLaunch", "Spotify", "AdobeARM", "CCXProcess")
 
@@ -148,11 +144,9 @@ if (Get-ItemProperty -Path $hkcuRun -Name "OneDriveSetup" -ErrorAction SilentlyC
 # 4. Bloatware-Bereinigung (Muellschlucker)
 # ==========================================
 Write-Info "Starte Bloatware-Bereinigung (Suche nach Junk-Apps)..."
-# "WebAdvisor" explizit hinzugefuegt!
 $bloatwareList = @("McAfee", "WebAdvisor", "Norton", "ExpressVPN", "Dropbox", "TikTok", "Instagram", "Facebook", "Spotify", "WhatsApp")
 
 foreach ($junk in $bloatwareList) {
-    # 1. Moderne Windows-Apps (UWP/Store) unsichtbar killen
     $appx = Get-AppxPackage -Name "*$junk*" -ErrorAction SilentlyContinue
     if ($appx) {
         Write-Info "Entferne Windows-App: $($appx.Name) unsichtbar..."
@@ -160,7 +154,6 @@ foreach ($junk in $bloatwareList) {
         Write-Success "$junk (Windows App) erfolgreich entfernt."
     }
 
-    # 2. Klassische Desktop-Programme (McAfee, WebAdvisor, Norton, Dropbox) aufspueren und offiziellen Uninstaller oeffnen
     $uninstallPaths = @(
         "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
         "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
@@ -173,7 +166,6 @@ foreach ($junk in $bloatwareList) {
             Write-Warn "Desktop-Bloatware gefunden: $($app.DisplayName)"
             Write-Warn "--> Oeffne Deinstallations-Fenster... Bitte auf dem Bildschirm bestaetigen!"
             try {
-                # Startet den originalen Uninstaller sichtbar
                 cmd.exe /c "$($app.UninstallString)" | Out-Null
                 Write-Success "Deinstallations-Aufruf fuer $($app.DisplayName) gesendet."
             } catch {
@@ -223,7 +215,8 @@ Write-Host ""
 Write-Host "========================================" -ForegroundColor Magenta
 Write-Host "    APP-INSTALLATIONSMENUE (WINGET)" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Magenta
-Write-Host "[1] Standard-Apps installieren (7-Zip, Chrome, Firefox, LibreOffice)"
+# Hier wurde der Text fuer Option 1 angepasst:
+Write-Host "[1] Standard-Apps installieren (7-Zip, Chrome, Firefox, Adobe Acrobat Reader)"
 Write-Host "[2] Manuelle Auswahl (Eingabe von Nummern)"
 Write-Host "[0] Abbrechen"
 Write-Host "========================================" -ForegroundColor Magenta
@@ -236,7 +229,8 @@ switch ($menuChoice) {
         Install-WingetApp -Id $wingetApps[1].Id -Name $wingetApps[1].Name -Interactive ([bool]$wingetApps[1].Interactive)
         Install-WingetApp -Id $wingetApps[2].Id -Name $wingetApps[2].Name -Interactive ([bool]$wingetApps[2].Interactive)
         Install-WingetApp -Id $wingetApps[4].Id -Name $wingetApps[4].Name -Interactive ([bool]$wingetApps[4].Interactive)
-        Install-WingetApp -Id $wingetApps[5].Id -Name $wingetApps[5].Name -Interactive ([bool]$wingetApps[5].Interactive)
+        # Hier wird nun Adobe (Nummer 3) statt LibreOffice (Nummer 5) installiert:
+        Install-WingetApp -Id $wingetApps[3].Id -Name $wingetApps[3].Name -Interactive ([bool]$wingetApps[3].Interactive)
     }
     '2' {
         Write-Host ""
