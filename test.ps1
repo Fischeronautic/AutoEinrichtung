@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
-    Windows 11 Ersteinrichtungs-Skript (Cloud-Version)
+    Windows 11 Ersteinrichtungs-Skript (Cloud-Version / Zero-Touch)
 .DESCRIPTION
-    Fuehrt Basis-Einstellungen fuer Windows 11 aus. Optimiert fuer 'irm | iex'.
+    Fuehrt Basis-Einstellungen fuer Windows 11 aus. Fragt Apps am Anfang ab.
 #>
 
 # ==========================================
@@ -14,7 +14,7 @@ function Write-ErrorMsg { param([string]$Message) Write-Host "[-] $Message" -For
 function Write-Warn { param([string]$Message) Write-Host "[!] $Message" -ForegroundColor Yellow }
 
 # ==========================================
-# 1. Admin-Rechte & Internet-Check (CLOUD OPTIMIERT)
+# 1. Admin-Rechte & Internet-Check
 # ==========================================
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
@@ -32,7 +32,6 @@ Write-Success "Administratorrechte erfolgreich bestaetigt."
 
 Write-Info "Pruefe Internetverbindung..."
 $internetVerfuegbar = $false
-
 while (-not $internetVerfuegbar) {
     if (Test-Connection -ComputerName "8.8.8.8" -Count 1 -Quiet -ErrorAction SilentlyContinue) {
         $internetVerfuegbar = $true
@@ -46,7 +45,49 @@ while (-not $internetVerfuegbar) {
 }
 
 # ==========================================
-# 2. System-Basics (BitLocker startet hier im Hintergrund)
+# 2. VORAB-ABFRAGE: App-Installation (Zero-Touch Vorbereitung)
+# ==========================================
+$wingetApps = @{
+    1 = @{ Name = "7-Zip"; Id = "7zip.7zip" }
+    2 = @{ Name = "Google Chrome"; Id = "Google.Chrome" }
+    3 = @{ Name = "Adobe Acrobat Reader"; Id = "Adobe.Acrobat.Reader.32-bit"; Interactive = $true }
+    4 = @{ Name = "Mozilla Firefox"; Id = "Mozilla.Firefox" }
+    5 = @{ Name = "LibreOffice"; Id = "TheDocumentFoundation.LibreOffice" }
+    6 = @{ Name = "Thunderbird"; Id = "Mozilla.Thunderbird" }
+    7 = @{ Name = "TeamViewer"; Id = "TeamViewer.TeamViewer" }
+    8 = @{ Name = "Sumatra PDF (Sehr schnelle Alternative)"; Id = "SumatraPDF.SumatraPDF" }
+    9 = @{ Name = "Foxit PDF Reader (Gute Adobe-Alternative)"; Id = "Foxit.FoxitReader" }
+}
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host "    APP-INSTALLATIONSMENUE (WINGET)" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Magenta
+Write-Host "[1] Standard-Apps installieren (7-Zip, Chrome, Firefox, Adobe Acrobat Reader)"
+Write-Host "[2] Manuelle Auswahl (Eingabe von Nummern)"
+Write-Host "[0] Abbrechen"
+Write-Host "========================================" -ForegroundColor Magenta
+
+$menuChoice = Read-Host "Bitte waehle eine Option"
+$userAppSelection = ""
+
+if ($menuChoice -eq '2') {
+    Write-Host ""
+    Write-Host "--- Verfuegbare Apps ---" -ForegroundColor Cyan
+    foreach ($key in ($wingetApps.Keys | Sort-Object)) {
+        Write-Host "[$key] $($wingetApps[$key].Name)"
+    }
+    $userAppSelection = Read-Host "Bitte gewuenschte Nummern getrennt durch Leerzeichen eingeben (z.B. '1 3 8')"
+}
+
+Write-Host ""
+Write-Success "Auswahl gespeichert! Das Skript arbeitet den Rest nun vollautomatisch ab."
+Write-Host "Lehn dich zurueck..." -ForegroundColor Yellow
+Start-Sleep -Seconds 2
+Write-Host ""
+
+# ==========================================
+# 3. System-Basics (BitLocker startet hier im Hintergrund)
 # ==========================================
 Write-Info "Synchronisiere Windows-Zeit..."
 try {
@@ -78,7 +119,7 @@ try {
 }
 
 # ==========================================
-# 3. Windows 11 Anpassungen via Registry
+# 4. Windows 11 Anpassungen via Registry & Autostart
 # ==========================================
 Write-Info "Wende Windows 11 Registry-Anpassungen an..."
 
@@ -144,7 +185,7 @@ if (Get-ItemProperty -Path $hkcuRun -Name "OneDriveSetup" -ErrorAction SilentlyC
 }
 
 # ==========================================
-# 4. Bloatware-Bereinigung (Muellschlucker)
+# 5. Bloatware-Bereinigung (Muellschlucker)
 # ==========================================
 Write-Info "Starte Bloatware-Bereinigung (Suche nach Junk-Apps)..."
 $bloatwareList = @("McAfee", "WebAdvisor", "Norton", "ExpressVPN", "Dropbox", "TikTok", "Instagram", "Facebook", "Spotify", "WhatsApp")
@@ -180,26 +221,12 @@ foreach ($junk in $bloatwareList) {
 Write-Success "Bloatware-Pruefung abgeschlossen."
 
 # ==========================================
-# 5. App-Installation (Winget)
+# 6. App-Installation ausfuehren (Winget)
 # ==========================================
-$wingetApps = @{
-    1 = @{ Name = "7-Zip"; Id = "7zip.7zip" }
-    2 = @{ Name = "Google Chrome"; Id = "Google.Chrome" }
-    # Hier ist deine neue 32-bit Adobe ID:
-    3 = @{ Name = "Adobe Acrobat Reader"; Id = "Adobe.Acrobat.Reader.32-bit"; Interactive = $true }
-    4 = @{ Name = "Mozilla Firefox"; Id = "Mozilla.Firefox" }
-    5 = @{ Name = "LibreOffice"; Id = "TheDocumentFoundation.LibreOffice" }
-    6 = @{ Name = "Thunderbird"; Id = "Mozilla.Thunderbird" }
-    7 = @{ Name = "TeamViewer"; Id = "TeamViewer.TeamViewer" }
-    8 = @{ Name = "Sumatra PDF (Sehr schnelle, leichte Alternative)"; Id = "SumatraPDF.SumatraPDF" }
-    9 = @{ Name = "Foxit PDF Reader (Gute Adobe-Alternative)"; Id = "Foxit.FoxitReader" }
-}
-
 function Install-WingetApp {
     param([string]$Id, [string]$Name, [bool]$Interactive = $false)
     Write-Info "Starte Installation von $($Name) ($Id)..."
     try {
-        # "--source winget" wurde hier ergaenzt, um den Befehl absolut sicher zu machen:
         if ($Interactive) {
             winget install --id $Id -e --source winget --accept-package-agreements --accept-source-agreements | Out-Null
         } else {
@@ -209,7 +236,7 @@ function Install-WingetApp {
         if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335215) { 
             Write-Success "$($Name) erfolgreich installiert."
         } else {
-            Write-Warn "$($Name) Installation abgeschlossen (Statuscode: $LASTEXITCODE. Moeglicherweise fehlgeschlagen oder erfordert Neustart)."
+            Write-Warn "$($Name) Installation abgeschlossen (Statuscode: $LASTEXITCODE. Moeglicherweise erfordert es einen Neustart)."
         }
     } catch {
         Write-ErrorMsg "Fehler bei der Installation von $($Name): $_"
@@ -218,55 +245,44 @@ function Install-WingetApp {
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Magenta
-Write-Host "    APP-INSTALLATIONSMENUE (WINGET)" -ForegroundColor Cyan
+Write-Host "    FUEHRE GEWAEHLTE APP-INSTALLATION AUS" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Magenta
-Write-Host "[1] Standard-Apps installieren (7-Zip, Chrome, Firefox, Adobe Acrobat Reader)"
-Write-Host "[2] Manuelle Auswahl (Eingabe von Nummern)"
-Write-Host "[0] Abbrechen"
-Write-Host "========================================" -ForegroundColor Magenta
-
-$menuChoice = Read-Host "Bitte waehle eine Option"
 
 switch ($menuChoice) {
     '1' {
-        Write-Info "Automatische Installation der Standard-Apps wird gestartet..."
+        Write-Info "Automatische Installation der Standard-Apps..."
         Install-WingetApp -Id $wingetApps[1].Id -Name $wingetApps[1].Name -Interactive ([bool]$wingetApps[1].Interactive)
         Install-WingetApp -Id $wingetApps[2].Id -Name $wingetApps[2].Name -Interactive ([bool]$wingetApps[2].Interactive)
         Install-WingetApp -Id $wingetApps[4].Id -Name $wingetApps[4].Name -Interactive ([bool]$wingetApps[4].Interactive)
         Install-WingetApp -Id $wingetApps[3].Id -Name $wingetApps[3].Name -Interactive ([bool]$wingetApps[3].Interactive)
     }
     '2' {
-        Write-Host ""
-        Write-Host "--- Verfuegbare Apps ---" -ForegroundColor Cyan
-        foreach ($key in ($wingetApps.Keys | Sort-Object)) {
-            Write-Host "[$key] $($wingetApps[$key].Name)"
-        }
-        $selection = Read-Host "Bitte gewuenschte Nummern getrennt durch Leerzeichen eingeben (z.B. '1 3 8')"
-        
-        if (-not [string]::IsNullOrWhiteSpace($selection)) {
-            $selectedKeys = $selection -split '\s+'
+        if (-not [string]::IsNullOrWhiteSpace($userAppSelection)) {
+            $selectedKeys = $userAppSelection -split '\s+'
             foreach ($keyString in $selectedKeys) {
                 if ([int]::TryParse($keyString, [ref]$null)) {
                     $num = [int]$keyString
                     if ($wingetApps.ContainsKey($num)) {
                         Install-WingetApp -Id $wingetApps[$num].Id -Name $wingetApps[$num].Name -Interactive ([bool]$wingetApps[$num].Interactive)
                     } else {
-                        Write-Warn "Ueberspringe ungueltige Auswahl: $num (Option existiert nicht)"
+                        Write-Warn "Ueberspringe ungueltige Auswahl: $num"
                     }
                 }
             }
+        } else {
+            Write-Warn "Keine gueltigen Nummern eingegeben. Ueberspringe Apps."
         }
     }
     '0' {
         Write-Info "App-Installation wird uebersprungen."
     }
     Default {
-        Write-ErrorMsg "Ungueltige Eingabe. App-Installation wird uebersprungen."
+        Write-ErrorMsg "Keine gueltige App-Auswahl am Anfang getroffen. Ueberspringe Installation."
     }
 }
 
 # ==========================================
-# 6. Taskleisten-Pins setzen (NUR EXPLORER)
+# 7. Taskleisten-Pins setzen (NUR EXPLORER)
 # ==========================================
 Write-Info "Raeume Taskleiste auf und pinne nur den Explorer..."
 try {
@@ -295,7 +311,7 @@ try {
 }
 
 # ==========================================
-# 7. Abschluss-Pruefung (BitLocker)
+# 8. Abschluss-Pruefung (BitLocker)
 # ==========================================
 Write-Host ""
 Write-Info "Warte auf Abschluss der BitLocker-Entschluesselung (falls noch aktiv)..."
