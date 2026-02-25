@@ -155,8 +155,20 @@ try {
     Write-ErrorMsg "Fehler beim Deaktivieren der Benachrichtigungen."
 }
 
+# --- EDGE SPEZIAL-BREMSE ---
+Write-Info "Deaktiviere Microsoft Edge Autostart & Hintergrundprozesse..."
+try {
+    $edgePolicyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Edge"
+    if (-not (Test-Path $edgePolicyPath)) { New-Item -Path $edgePolicyPath -Force | Out-Null }
+    Set-ItemProperty -Path $edgePolicyPath -Name "StartupBoostEnabled" -Value 0 -Type DWord -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $edgePolicyPath -Name "BackgroundModeEnabled" -Value 0 -Type DWord -ErrorAction SilentlyContinue
+    Write-Success "Edge Startup-Boost und Hintergrundmodus dauerhaft deaktiviert."
+} catch {
+    Write-ErrorMsg "Fehler beim Setzen der Edge-Richtlinien."
+}
+
 Write-Info "Deaktiviere klassische User-Programme aus dem Autostart..."
-$startupAppsToDisable = @("OneDrive", "OneDriveSetup", "Teams", "com.squirrel.Teams.Teams", "MicrosoftEdgeAutoLaunch", "Spotify", "AdobeARM", "CCXProcess")
+$startupAppsToDisable = @("OneDrive", "OneDriveSetup", "Teams", "com.squirrel.Teams.Teams", "Spotify", "AdobeARM", "CCXProcess")
 
 $hkcuRun = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $hklmRun = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
@@ -176,6 +188,17 @@ foreach ($app in $startupAppsToDisable) {
     if (Get-ItemProperty -Path $hklmRun -Name $app -ErrorAction SilentlyContinue) {
         Set-ItemProperty -Path $hklmApproved -Name $app -Value $disabledValue -Type Binary -ErrorAction SilentlyContinue
         Write-Success "Autostart fuer '$app' (System-Ebene) deaktiviert."
+    }
+}
+
+# Joker-Suche nach versteckten Edge-Autostarts
+foreach ($runPath in @($hkcuRun, $hklmRun)) {
+    if (Test-Path $runPath) {
+        $edgeKeys = Get-ItemProperty -Path $runPath -ErrorAction SilentlyContinue | Get-Member -MemberType NoteProperty | Where-Object Name -match "Edge"
+        foreach ($key in $edgeKeys) {
+            Remove-ItemProperty -Path $runPath -Name $key.Name -ErrorAction SilentlyContinue
+            Write-Success "Versteckter Edge-Autostarteintrag ($($key.Name)) geloescht."
+        }
     }
 }
 
