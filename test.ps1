@@ -24,9 +24,7 @@ if (-not $isAdmin) {
     Write-Warn "Da dieses Skript direkt aus dem Internet laeuft, kann es sich nicht selbst als Admin neustarten."
     Write-Warn "Bitte druecke auf 'Start', tippe 'PowerShell', waehle 'Als Administrator ausfuehren' und fuege deinen Link erneut ein."
     Write-Host ""
-    # Bremsklotz
     Read-Host "Druecke Enter, um den Vorgang abzubrechen..."
-    # DER MAGISCHE TAUSCH: 'return' statt 'exit', damit das Fenster offen bleibt!
     return
 }
 
@@ -187,7 +185,8 @@ Write-Success "Bloatware-Pruefung abgeschlossen."
 $wingetApps = @{
     1 = @{ Name = "7-Zip"; Id = "7zip.7zip" }
     2 = @{ Name = "Google Chrome"; Id = "Google.Chrome" }
-    3 = @{ Name = "Adobe Acrobat Reader"; Id = "Adobe.Acrobat.Reader.64-bit"; Interactive = $true }
+    # Hier ist deine neue 32-bit Adobe ID:
+    3 = @{ Name = "Adobe Acrobat Reader"; Id = "Adobe.Acrobat.Reader.32-bit"; Interactive = $true }
     4 = @{ Name = "Mozilla Firefox"; Id = "Mozilla.Firefox" }
     5 = @{ Name = "LibreOffice"; Id = "TheDocumentFoundation.LibreOffice" }
     6 = @{ Name = "Thunderbird"; Id = "Mozilla.Thunderbird" }
@@ -200,10 +199,11 @@ function Install-WingetApp {
     param([string]$Id, [string]$Name, [bool]$Interactive = $false)
     Write-Info "Starte Installation von $($Name) ($Id)..."
     try {
+        # "--source winget" wurde hier ergaenzt, um den Befehl absolut sicher zu machen:
         if ($Interactive) {
-            winget install --id $Id -e --accept-package-agreements --accept-source-agreements | Out-Null
+            winget install --id $Id -e --source winget --accept-package-agreements --accept-source-agreements | Out-Null
         } else {
-            winget install --id $Id -e --silent --accept-package-agreements --accept-source-agreements | Out-Null
+            winget install --id $Id -e --source winget --silent --accept-package-agreements --accept-source-agreements | Out-Null
         }
         
         if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335215) { 
@@ -257,3 +257,67 @@ switch ($menuChoice) {
             }
         }
     }
+    '0' {
+        Write-Info "App-Installation wird uebersprungen."
+    }
+    Default {
+        Write-ErrorMsg "Ungueltige Eingabe. App-Installation wird uebersprungen."
+    }
+}
+
+# ==========================================
+# 6. Taskleisten-Pins setzen (NUR EXPLORER)
+# ==========================================
+Write-Info "Raeume Taskleiste auf und pinne nur den Explorer..."
+try {
+    $taskbandPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Taskband"
+    if (Test-Path $taskbandPath) {
+        Remove-Item -Path $taskbandPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    $jsonPath = "$env:LOCALAPPDATA\Microsoft\Windows\Shell\LayoutModification.json"
+    $layoutJson = @"
+{
+  "defaultLayoutFile": "LayoutModification.xml",
+  "taskbarActions": {
+    "command": "add",
+    "pins": [
+      { "desktopAppId": "Microsoft.Windows.Explorer" }
+    ]
+  }
+}
+"@
+    Set-Content -Path $jsonPath -Value $layoutJson -Encoding UTF8 -Force
+    Stop-Process -Name explorer -Force
+    Write-Success "Taskleiste bereinigt. Nur Explorer ist angepinnt."
+} catch {
+    Write-ErrorMsg "Fehler beim Anpassen der Taskleisten-Pins: $_"
+}
+
+# ==========================================
+# 7. Abschluss-Pruefung (BitLocker)
+# ==========================================
+Write-Host ""
+Write-Info "Warte auf Abschluss der BitLocker-Entschluesselung (falls noch aktiv)..."
+try {
+    $blEnd = Get-BitLockerVolume -MountPoint "C:" -ErrorAction SilentlyContinue
+    if ($null -ne $blEnd -and $blEnd.VolumeStatus -in @("DecryptionInProgress", "EncryptionInProgress", "FullyEncrypted")) {
+        while ((Get-BitLockerVolume -MountPoint "C:").VolumeStatus -ne "FullyDecrypted") {
+            $progress = (Get-BitLockerVolume -MountPoint "C:").EncryptionPercentage
+            Write-Host -NoNewline "`r[i] Entschluesselung laeuft noch... $progress% "
+            Start-Sleep -Seconds 2
+        }
+        Write-Host ""
+        Write-Success "BitLocker ist nun vollstaendig deaktiviert."
+    } else {
+        Write-Success "BitLocker war bereits vollstaendig deaktiviert."
+    }
+} catch {
+    Write-Warn "BitLocker-Abschlusspruefung konnte nicht durchgefuehrt werden."
+}
+
+Write-Host ""
+Write-Success "================================================="
+Write-Success " Ersteinrichtung erfolgreich abgeschlossen! "
+Write-Success "================================================="
+Read-Host "Druecke Enter um das Skript zu beenden..."
