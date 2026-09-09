@@ -152,7 +152,7 @@ if (-not $wingetVerfuegbar) {
 $wingetApps = [ordered]@{
     '1'  = @{ Name = "7-Zip";                                     Id = "7zip.7zip" }
     '2'  = @{ Name = "Google Chrome";                              Id = "Google.Chrome" }
-    '3'  = @{ Name = "Adobe Acrobat Reader";                       Id = "Adobe.Acrobat.Reader.32-bit" }
+    '3'  = @{ Name = "Adobe Acrobat Reader";                       Id = "Adobe.Acrobat.Reader.32-bit"; Modus = "Standard" }
     '4'  = @{ Name = "Mozilla Firefox (Deutsch)";                  Id = "Mozilla.Firefox.de" }
     '5'  = @{ Name = "LibreOffice";                                Id = "TheDocumentFoundation.LibreOffice" }
     '6'  = @{ Name = "Thunderbird (Deutsch)";                      Id = "Mozilla.Thunderbird.de" }
@@ -544,17 +544,21 @@ function Install-WingetApp {
     param(
         [string]$Id,
         [string]$Name,
-        [bool]$Interactive = $false,
-        [int]$Versuche = 3
+        [ValidateSet('Still', 'Standard', 'Interaktiv')]
+        [string]$Modus = 'Still',
+        [int]$Versuche = 3,
+        [int]$TimeoutMinuten = 30
     )
 
     # Achtung: NICHT $args nennen - das ist eine automatische PowerShell-Variable.
     $wgArgs = @('install', '--id', $Id, '-e', '--source', 'winget',
                 '--accept-package-agreements', '--accept-source-agreements')
-    if ($Interactive) {
-        $wgArgs += '--interactive'
-    } else {
-        $wgArgs += @('--silent', '--disable-interactivity')
+    switch ($Modus) {
+        'Still'      { $wgArgs += @('--silent', '--disable-interactivity') }
+        'Interaktiv' { $wgArgs += '--interactive' }
+        # 'Standard': weder --silent noch --interactive. winget waehlt dann
+        # selbst 'SilentWithProgress'. Manche Installer (Adobe Reader) bleiben
+        # mit erzwungenem --silent haengen.
     }
 
     for ($versuch = 1; $versuch -le $Versuche; $versuch++) {
@@ -568,11 +572,53 @@ function Install-WingetApp {
         # Nur eine MSI-Installation gleichzeitig - sonst Exitcode 1618.
         $null = Wait-InstallerFrei -MaxSekunden 600
 
+        # Ueber Start-Process, damit ein haengender Installer nach
+        # $TimeoutMinuten abgebrochen werden kann statt das Skript zu blockieren.
+        $stempel      = [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $ausgabeDatei = Join-Path $env:TEMP "winget_out_$stempel.txt"
+        $fehlerDatei  = Join-Path $env:TEMP "winget_err_$stempel.txt"
+        $abgebrochen  = $false
+
         try {
-            $ausgabe = & winget.exe @wgArgs 2>&1
-            $code = $LASTEXITCODE
+            $prozess = Start-Process -FilePath 'winget.exe' -ArgumentList $wgArgs -NoNewWindow -PassThru `
+                          -RedirectStandardOutput $ausgabeDatei -RedirectStandardError $fehlerDatei -ErrorAction Stop
         } catch {
             Write-ErrorMsg "$Name : winget konnte nicht gestartet werden: $($_.Exception.Message)"
+            return
+        }
+
+        Write-Info "    laeuft... (Abbruch nach spaetestens $TimeoutMinuten Minuten)"
+        $null = $prozess | Wait-Process -Timeout ($TimeoutMinuten * 60) -ErrorAction SilentlyContinue
+
+        if (-not $prozess.HasExited) {
+            Stop-Process -Id $prozess.Id -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+            $abgebrochen = $true
+            $code = $null
+        } else {
+            $code = $prozess.ExitCode
+        }
+
+        # Ausgabe einsammeln und Steuerzeichen der Fortschrittsanzeige entfernen.
+        $ausgabe = @()
+        foreach ($datei in @($ausgabeDatei, $fehlerDatei)) {
+            if (Test-Path $datei) {
+                $ausgabe += @(Get-Content -Path $datei -ErrorAction SilentlyContinue)
+                Remove-Item -Path $datei -Force -ErrorAction SilentlyContinue
+            }
+        }
+        $ausgabe = @($ausgabe | ForEach-Object { ($_ -replace '[\u0000-\u0008\u000B\u000C\u000E-\u001F]', '').Trim() } | Where-Object { $_ })
+
+        if ($abgebrochen) {
+            # Nach einem Timeout nicht stur wiederholen - erst pruefen, ob die
+            # App trotzdem installiert wurde (Installer laufen oft im Hintergrund weiter).
+            Write-Warn "$Name : nach $TimeoutMinuten Minuten abgebrochen."
+            if (Test-AppInstalliert -Id $Id) {
+                Write-Success "$Name ist trotzdem installiert."
+            } else {
+                Write-ErrorMsg "$Name wurde nicht installiert (Zeitueberschreitung nach $TimeoutMinuten Minuten)."
+                Add-Hinweis "$Name manuell installieren (Installer haengt)."
+            }
             return
         }
 
@@ -772,7 +818,8 @@ if ($selectedApps.Count -gt 0) {
         if ($app.Custom -eq "Outlook") {
             Install-Outlook
         } else {
-            Install-WingetApp -Id $app.Id -Name $app.Name -Interactive ([bool]$app.Interactive)
+            $modus = if ($app.Modus) { $app.Modus } else { 'Still' }
+            Install-WingetApp -Id $app.Id -Name $app.Name -Modus $modus
         }
     }
 } elseif ($wingetVerfuegbar) {
