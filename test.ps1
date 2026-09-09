@@ -845,7 +845,9 @@ if ($systemSetup) {
     )
 
     $pinZeilen = New-Object System.Collections.Generic.List[string]
+    $pinNamen  = New-Object System.Collections.Generic.List[string]
     $pinZeilen.Add('        <taskbar:DesktopApp DesktopApplicationID="Microsoft.Windows.Explorer" />')
+    $pinNamen.Add('Explorer')
 
     foreach ($muster in $pinMuster) {
         foreach ($sm in $startMenues) {
@@ -856,6 +858,7 @@ if ($systemSetup) {
             if ($lnk) {
                 $pfad = ("$($sm.Var)\$($lnk.Name)") -replace '&', '&amp;'
                 $pinZeilen.Add("        <taskbar:DesktopApp DesktopApplicationLinkPath=`"$pfad`" />")
+                $pinNamen.Add($lnk.BaseName)
                 Write-Info "Taskleiste: '$($lnk.BaseName)' wird angepinnt."
                 break
             }
@@ -921,9 +924,9 @@ $($pinZeilen -join "`r`n")
     }
 
     if ($layoutOk) {
-        Write-Success "Taskleisten-Layout hinterlegt (nur Explorer angepinnt)."
+        Write-Success "Taskleisten-Layout hinterlegt: $($pinNamen -join ', ')."
         Write-Warn "Hinweis: Windows uebernimmt das Layout endgueltig erst nach Ab- und Anmeldung."
-        Add-Hinweis "Taskleiste: einmal ab- und wieder anmelden, damit nur der Explorer gepinnt ist."
+        Add-Hinweis "Taskleiste: einmal ab- und wieder anmelden, dann sind angepinnt: $($pinNamen -join ', ')."
     } else {
         Write-ErrorMsg "Taskleisten-Layout konnte nicht hinterlegt werden."
     }
