@@ -546,8 +546,7 @@ function Install-WingetApp {
         [string]$Name,
         [ValidateSet('Still', 'Standard', 'Interaktiv')]
         [string]$Modus = 'Still',
-        [int]$Versuche = 3,
-        [int]$TimeoutMinuten = 30
+        [int]$Versuche = 3
     )
 
     # Achtung: NICHT $args nennen - das ist eine automatische PowerShell-Variable.
@@ -556,9 +555,9 @@ function Install-WingetApp {
     switch ($Modus) {
         'Still'      { $wgArgs += @('--silent', '--disable-interactivity') }
         'Interaktiv' { $wgArgs += '--interactive' }
-        # 'Standard': weder --silent noch --interactive. winget waehlt dann
-        # selbst 'SilentWithProgress'. Manche Installer (Adobe Reader) bleiben
-        # mit erzwungenem --silent haengen.
+        # 'Standard': weder --silent noch --interactive - so lief das Skript
+        # urspruenglich. winget waehlt dann selbst 'SilentWithProgress'.
+        # Adobe Reader braucht mit erzwungenem --silent auffaellig lange.
     }
 
     for ($versuch = 1; $versuch -le $Versuche; $versuch++) {
@@ -572,53 +571,11 @@ function Install-WingetApp {
         # Nur eine MSI-Installation gleichzeitig - sonst Exitcode 1618.
         $null = Wait-InstallerFrei -MaxSekunden 600
 
-        # Ueber Start-Process, damit ein haengender Installer nach
-        # $TimeoutMinuten abgebrochen werden kann statt das Skript zu blockieren.
-        $stempel      = [guid]::NewGuid().ToString('N').Substring(0, 8)
-        $ausgabeDatei = Join-Path $env:TEMP "winget_out_$stempel.txt"
-        $fehlerDatei  = Join-Path $env:TEMP "winget_err_$stempel.txt"
-        $abgebrochen  = $false
-
         try {
-            $prozess = Start-Process -FilePath 'winget.exe' -ArgumentList $wgArgs -NoNewWindow -PassThru `
-                          -RedirectStandardOutput $ausgabeDatei -RedirectStandardError $fehlerDatei -ErrorAction Stop
+            $ausgabe = & winget.exe @wgArgs 2>&1
+            $code = $LASTEXITCODE
         } catch {
             Write-ErrorMsg "$Name : winget konnte nicht gestartet werden: $($_.Exception.Message)"
-            return
-        }
-
-        Write-Info "    laeuft... (Abbruch nach spaetestens $TimeoutMinuten Minuten)"
-        $null = $prozess | Wait-Process -Timeout ($TimeoutMinuten * 60) -ErrorAction SilentlyContinue
-
-        if (-not $prozess.HasExited) {
-            Stop-Process -Id $prozess.Id -Force -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 2
-            $abgebrochen = $true
-            $code = $null
-        } else {
-            $code = $prozess.ExitCode
-        }
-
-        # Ausgabe einsammeln und Steuerzeichen der Fortschrittsanzeige entfernen.
-        $ausgabe = @()
-        foreach ($datei in @($ausgabeDatei, $fehlerDatei)) {
-            if (Test-Path $datei) {
-                $ausgabe += @(Get-Content -Path $datei -ErrorAction SilentlyContinue)
-                Remove-Item -Path $datei -Force -ErrorAction SilentlyContinue
-            }
-        }
-        $ausgabe = @($ausgabe | ForEach-Object { ($_ -replace '[\u0000-\u0008\u000B\u000C\u000E-\u001F]', '').Trim() } | Where-Object { $_ })
-
-        if ($abgebrochen) {
-            # Nach einem Timeout nicht stur wiederholen - erst pruefen, ob die
-            # App trotzdem installiert wurde (Installer laufen oft im Hintergrund weiter).
-            Write-Warn "$Name : nach $TimeoutMinuten Minuten abgebrochen."
-            if (Test-AppInstalliert -Id $Id) {
-                Write-Success "$Name ist trotzdem installiert."
-            } else {
-                Write-ErrorMsg "$Name wurde nicht installiert (Zeitueberschreitung nach $TimeoutMinuten Minuten)."
-                Add-Hinweis "$Name manuell installieren (Installer haengt)."
-            }
             return
         }
 
@@ -852,9 +809,20 @@ if ($systemSetup) {
     foreach ($muster in $pinMuster) {
         foreach ($sm in $startMenues) {
             if (-not (Test-Path $sm.Basis)) { continue }
-            $lnk = Get-ChildItem -Path $sm.Basis -Filter '*.lnk' -ErrorAction SilentlyContinue |
-                   Where-Object { $_.BaseName -like "$muster*" } |
-                   Select-Object -First 1
+            $kandidaten = @(Get-ChildItem -Path $sm.Basis -Filter '*.lnk' -ErrorAction SilentlyContinue |
+                            Where-Object { $_.BaseName -like "$muster*" })
+
+            # Exakter Treffer zuerst: sonst gewinnt 'Firefox Private Browsing.lnk',
+            # weil Get-ChildItem alphabetisch liefert und das Leerzeichen vor
+            # dem Punkt sortiert.
+            $lnk = $kandidaten | Where-Object { $_.BaseName -eq $muster } | Select-Object -First 1
+            if (-not $lnk) {
+                $lnk = $kandidaten |
+                       Where-Object { $_.BaseName -notmatch '(?i)privat|private|inprivate|uninstall|deinstall' } |
+                       Sort-Object { $_.BaseName.Length } |
+                       Select-Object -First 1
+            }
+
             if ($lnk) {
                 $pfad = ("$($sm.Var)\$($lnk.Name)") -replace '&', '&amp;'
                 $pinZeilen.Add("        <taskbar:DesktopApp DesktopApplicationLinkPath=`"$pfad`" />")
