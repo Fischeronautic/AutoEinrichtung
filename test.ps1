@@ -162,59 +162,39 @@ $standardApps = @('1', '2', '4', '3')
 $systemSetup  = $true
 $selectedApps = @()
 
-Write-Host ""
-Write-Host "========================================" -ForegroundColor Magenta
-Write-Host "    WAS SOLL DAS SKRIPT MACHEN?" -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Magenta
-Write-Host "[1] Komplette Ersteinrichtung (System-Anpassungen + Apps)"
-Write-Host "[2] NUR Apps installieren (Systemeinrichtung ueberspringen)"
-Write-Host "[3] NUR System-Anpassungen (keine Apps)"
-Write-Host "[0] Abbrechen"
-Write-Host "========================================" -ForegroundColor Magenta
+# Ohne winget gibt es nichts auszuwaehlen - dann laeuft nur die Systemeinrichtung.
+if (-not $wingetVerfuegbar) {
+    Write-Warn "Es wird nur die Systemeinrichtung ausgefuehrt (winget fehlt)."
+} else {
 
-do {
-    $modus = (Read-Host "Bitte waehle eine Option").Trim()
-    if ($modus -notin @('0', '1', '2', '3')) { Write-Warn "Ungueltige Eingabe. Bitte 0, 1, 2 oder 3 eingeben." }
-} while ($modus -notin @('0', '1', '2', '3'))
-
-if ($modus -eq '0') {
-    Write-Info "Abgebrochen. Es wurde nichts veraendert."
-    return
-}
-
-$systemSetup = ($modus -eq '1' -or $modus -eq '3')
-$appsGewuenscht = ($modus -eq '1' -or $modus -eq '2')
-
-if ($appsGewuenscht -and -not $wingetVerfuegbar) {
-    Write-Warn "Ohne winget koennen keine Apps installiert werden."
-    $appsGewuenscht = $false
-    if ($modus -eq '2') {
-        Write-ErrorMsg "Modus 'Nur Apps' ohne winget nicht moeglich. Abbruch."
-        Read-Host "Druecke Enter um das Skript zu beenden..."
-        return
-    }
-}
-
-if ($appsGewuenscht) {
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Magenta
-    Write-Host "    APP-AUSWAHL" -ForegroundColor Cyan
+    Write-Host "    APP-INSTALLATIONSMENUE (WINGET)" -ForegroundColor Cyan
     Write-Host "========================================" -ForegroundColor Magenta
-    Write-Host "[1] Standard-Apps (7-Zip, Chrome, Firefox DE, Adobe Acrobat Reader)"
+    Write-Host "[1] Standard-Apps installieren (7-Zip, Chrome, Firefox DE, Adobe Acrobat Reader)"
     Write-Host "[2] Manuelle Auswahl (Eingabe von Nummern)"
-    Write-Host "[0] Keine Apps installieren"
+    Write-Host "[3] NUR Apps installieren (manuelle Auswahl, ohne Systemeinrichtung)"
+    Write-Host "[0] Abbrechen"
     Write-Host "========================================" -ForegroundColor Magenta
 
     # Eingabe wird SOFORT validiert - nicht erst 10 Minuten spaeter beim Installieren.
     do {
-        $appWahl = (Read-Host "Bitte waehle eine Option").Trim()
-        if ($appWahl -notin @('0', '1', '2')) { Write-Warn "Ungueltige Eingabe. Bitte 0, 1 oder 2 eingeben." }
-    } while ($appWahl -notin @('0', '1', '2'))
+        $menuChoice = (Read-Host "Bitte waehle eine Option").Trim()
+        if ($menuChoice -notin @('0', '1', '2', '3')) { Write-Warn "Ungueltige Eingabe. Bitte 0, 1, 2 oder 3 eingeben." }
+    } while ($menuChoice -notin @('0', '1', '2', '3'))
 
-    if ($appWahl -eq '1') {
+    if ($menuChoice -eq '0') {
+        Write-Info "Abgebrochen. Es wurde nichts veraendert."
+        return
+    }
+
+    # Nur bei [3] wird die Systemeinrichtung uebersprungen.
+    $systemSetup = ($menuChoice -ne '3')
+
+    if ($menuChoice -eq '1') {
         $selectedApps = $standardApps
     }
-    elseif ($appWahl -eq '2') {
+    else {
         Write-Host ""
         Write-Host "--- Verfuegbare Apps ---" -ForegroundColor Cyan
         foreach ($key in $wingetApps.Keys) {
@@ -222,9 +202,15 @@ if ($appsGewuenscht) {
         }
 
         do {
-            $eingabe = (Read-Host "Gewuenschte Nummern getrennt durch Leerzeichen (z.B. '1 4 10'), leer = keine Apps").Trim()
+            $eingabe = (Read-Host "Gewuenschte Nummern getrennt durch Leerzeichen (z.B. '1 4 10')").Trim()
+
             if ([string]::IsNullOrWhiteSpace($eingabe)) {
-                Write-Warn "Keine Apps ausgewaehlt."
+                if ($menuChoice -eq '3') {
+                    # Ohne Apps und ohne Systemeinrichtung gaebe es nichts zu tun.
+                    Write-Warn "Bei 'Nur Apps' muss mindestens eine App gewaehlt werden."
+                    continue
+                }
+                Write-Warn "Keine Apps ausgewaehlt - es laeuft nur die Systemeinrichtung."
                 $selectedApps = @()
                 break
             }
@@ -250,6 +236,9 @@ if ($appsGewuenscht) {
     if ($selectedApps.Count -gt 0) {
         Write-Host ""
         Write-Info "Wird installiert: $((($selectedApps | ForEach-Object { $wingetApps[$_].Name })) -join ', ')"
+    }
+    if (-not $systemSetup) {
+        Write-Info "Systemeinrichtung wird uebersprungen - es werden nur Apps installiert."
     }
 }
 
@@ -732,7 +721,7 @@ if ($selectedApps.Count -gt 0) {
             Install-WingetApp -Id $app.Id -Name $app.Name -Interactive ([bool]$app.Interactive)
         }
     }
-} elseif ($appsGewuenscht) {
+} elseif ($wingetVerfuegbar) {
     Write-Info "Keine Apps ausgewaehlt - App-Installation wird uebersprungen."
 }
 
