@@ -444,53 +444,104 @@ if ($systemSetup) {
         Write-Warn "Edge-Richtlinien nur teilweise gesetzt - siehe Fehler oben."
     }
 
-    Write-Info "Deaktiviere klassische User-Programme aus dem Autostart..."
-    $startupAppsToDisable = @("OneDrive", "OneDriveSetup", "Teams", "com.squirrel.Teams.Teams", "Spotify", "AdobeARM", "CCXProcess")
+    Write-Info "Deaktiviere Autostart-Eintraege..."
 
-    $hkcuRun      = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-    $hklmRun      = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
-    $hkcuApproved = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
-    $hklmApproved = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
-
+    # Deaktiviert wird ueber StartupApproved - genau die Stelle, die auch der
+    # Task-Manager benutzt. Nichts wird geloescht, alles bleibt im
+    # Task-Manager unter 'Autostart' mit einem Klick reaktivierbar.
     $disabledValue = [byte[]](0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+    $deaktiviert   = New-Object System.Collections.Generic.List[string]
 
-    foreach ($app in $startupAppsToDisable) {
-        if ((Test-Path $hkcuRun) -and (Get-ItemProperty -Path $hkcuRun -Name $app -ErrorAction SilentlyContinue)) {
-            if (Set-RegValue -Path $hkcuApproved -Name $app -Value $disabledValue -Type 'Binary') {
-                Write-Success "Autostart fuer '$app' (User-Ebene) deaktiviert."
-            }
-        }
-        if ((Test-Path $hklmRun) -and (Get-ItemProperty -Path $hklmRun -Name $app -ErrorAction SilentlyContinue)) {
-            if (Set-RegValue -Path $hklmApproved -Name $app -Value $disabledValue -Type 'Binary') {
-                Write-Success "Autostart fuer '$app' (System-Ebene) deaktiviert."
+    # --- Klassische Run-Schluessel ---
+    $runPaare = @(
+        @{ Run = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+           Ok  = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
+           Ebene = "Benutzer" },
+        @{ Run = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+           Ok  = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
+           Ebene = "System" }
+    )
+
+    foreach ($paar in $runPaare) {
+        if (-not (Test-Path $paar.Run)) { continue }
+        $eintraege = @(Get-ItemProperty -Path $paar.Run -ErrorAction SilentlyContinue |
+                       Get-Member -MemberType NoteProperty |
+                       Where-Object { $_.Name -notmatch '^PS(Path|ParentPath|ChildName|Drive|Provider)$' })
+        foreach ($eintrag in $eintraege) {
+            if (Set-RegValue -Path $paar.Ok -Name $eintrag.Name -Value $disabledValue -Type 'Binary' -Leise) {
+                $deaktiviert.Add("$($eintrag.Name)  [$($paar.Ebene)]")
+            } else {
+                Write-Warn "Autostart '$($eintrag.Name)' konnte nicht deaktiviert werden."
             }
         }
     }
 
-    # Joker-Suche nach versteckten Edge-Autostarts
-    foreach ($runPath in @($hkcuRun, $hklmRun)) {
-        if (Test-Path $runPath) {
-            $edgeKeys = Get-ItemProperty -Path $runPath -ErrorAction SilentlyContinue |
-                        Get-Member -MemberType NoteProperty |
-                        Where-Object { $_.Name -match "Edge" }
-            foreach ($key in $edgeKeys) {
+    # --- Verknuepfungen im Autostart-Ordner ---
+    $ordnerPaare = @(
+        @{ Ordner = [Environment]::GetFolderPath('Startup')
+           Ok = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder"
+           Ebene = "Autostart-Ordner" },
+        @{ Ordner = [Environment]::GetFolderPath('CommonStartup')
+           Ok = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder"
+           Ebene = "Autostart-Ordner (alle)" }
+    )
+
+    foreach ($paar in $ordnerPaare) {
+        if ([string]::IsNullOrWhiteSpace($paar.Ordner) -or -not (Test-Path $paar.Ordner)) { continue }
+        $dateien = @(Get-ChildItem -Path $paar.Ordner -File -ErrorAction SilentlyContinue |
+                     Where-Object { $_.Name -ne 'desktop.ini' })
+        foreach ($datei in $dateien) {
+            if (Set-RegValue -Path $paar.Ok -Name $datei.Name -Value $disabledValue -Type 'Binary' -Leise) {
+                $deaktiviert.Add("$($datei.BaseName)  [$($paar.Ebene)]")
+            }
+        }
+    }
+
+    # --- Store-Apps (Phone Link, Teams, Cortana ...) ---
+    # Diese tauchen in den Einstellungen unter Autostart auf, liegen aber
+    # nicht in den Run-Schluesseln, sondern als StartupTask je App-Paket.
+    $appModelPfad = "HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData"
+    if (Test-Path $appModelPfad) {
+        foreach ($paket in @(Get-ChildItem -Path $appModelPfad -ErrorAction SilentlyContinue)) {
+            foreach ($task in @(Get-ChildItem -Path $paket.PSPath -ErrorAction SilentlyContinue)) {
+
+                $werte = Get-ItemProperty -Path $task.PSPath -ErrorAction SilentlyContinue
+                if ($null -eq $werte -or $null -eq $werte.State) { continue }
+
+                $paketName = $paket.PSChildName -replace '_.*$', ''
+
                 try {
-                    Remove-ItemProperty -Path $runPath -Name $key.Name -ErrorAction Stop
-                    Write-Success "Versteckter Edge-Autostarteintrag ($($key.Name)) geloescht."
+                    $art = (Get-Item -Path $task.PSPath).GetValueKind('State')
                 } catch {
-                    Write-ErrorMsg "Edge-Autostarteintrag '$($key.Name)' konnte nicht geloescht werden: $($_.Exception.Message)"
+                    continue
+                }
+
+                # Nur den DWord-Fall anfassen. Der alte Wert wandert in die
+                # Diagnose, damit die Bedeutung der Zahlen belegbar ist statt geraten.
+                if ($art -ne 'DWord') {
+                    Add-Diagnose "StartupTask '$paketName\$($task.PSChildName)': State ist $art (nicht angefasst)."
+                    continue
+                }
+
+                $altWert = [int]$werte.State
+                if ($altWert -eq 1) { continue }   # gilt als bereits deaktiviert
+
+                if (Set-RegValue -Path $task.PSPath -Name 'State' -Value 1 -Type 'DWord' -Leise) {
+                    $deaktiviert.Add("$paketName  [Store-App]")
+                    Add-Diagnose "StartupTask '$paketName\$($task.PSChildName)': State $altWert -> 1"
+                } else {
+                    Write-Warn "Autostart der Store-App '$paketName' konnte nicht deaktiviert werden."
                 }
             }
         }
     }
 
-    if ((Test-Path $hkcuRun) -and (Get-ItemProperty -Path $hkcuRun -Name "OneDriveSetup" -ErrorAction SilentlyContinue)) {
-        try {
-            Remove-ItemProperty -Path $hkcuRun -Name "OneDriveSetup" -ErrorAction Stop
-            Write-Success "OneDriveSetup komplett aus HKCU Run-Key entfernt."
-        } catch {
-            Write-ErrorMsg "OneDriveSetup konnte nicht entfernt werden: $($_.Exception.Message)"
-        }
+    if ($deaktiviert.Count -gt 0) {
+        Write-Success "$($deaktiviert.Count) Autostart-Eintraege deaktiviert:"
+        foreach ($eintrag in $deaktiviert) { Write-Host "      - $eintrag" -ForegroundColor DarkGray }
+        Add-Hinweis "Autostart: $($deaktiviert.Count) Eintraege deaktiviert - im Task-Manager unter 'Autostart' einzeln wieder aktivierbar."
+    } else {
+        Write-Info "Keine aktiven Autostart-Eintraege gefunden."
     }
 }
 
@@ -1026,6 +1077,43 @@ if ($systemSetup) {
 # ==========================================
 # 9. Zusammenfassung
 # ==========================================
+# ==========================================
+# 8b. Windows-Standard-Apps (Browser / PDF)
+# ==========================================
+# Setzen laesst sich das nicht: seit dem UserChoice Protection Driver (UCPD)
+# sind die UserChoice-Schluessel fuer http, https und .pdf hash-geschuetzt.
+# Das ist derselbe Schutz, der auch TaskbarDa blockiert - Werkzeuge wie
+# SetUserFTA funktionieren deshalb ebenfalls nicht mehr. UCPD abzuschalten
+# kommt nicht in Frage, der Treiber verhindert genau dieses Kapern.
+# Also: Einstellungsseite oeffnen, damit es zwei Klicks statt Sucherei sind.
+if ($selectedApps.Count -gt 0) {
+
+    $standardRelevant = @{
+        '2' = 'Google Chrome (Standardbrowser)'
+        '4' = 'Firefox (Standardbrowser)'
+        '3' = 'Adobe Acrobat Reader (PDF)'
+        '8' = 'Sumatra PDF (PDF)'
+        '9' = 'Foxit PDF Reader (PDF)'
+    }
+
+    $kandidaten = @($selectedApps |
+                    Where-Object { $standardRelevant.ContainsKey($_) } |
+                    ForEach-Object { $standardRelevant[$_] })
+
+    if ($kandidaten.Count -gt 0) {
+        Write-Host ""
+        Write-Info "Standard-Apps kann Windows aus Schutzgruenden nicht per Skript setzen."
+        Write-Info "Bitte von Hand festlegen: $($kandidaten -join ', ')"
+        try {
+            Start-Process "ms-settings:defaultapps" -ErrorAction Stop
+            Write-Success "Die Einstellungsseite 'Standard-Apps' wurde dafuer geoeffnet."
+        } catch {
+            Write-Warn "Einstellungsseite konnte nicht geoeffnet werden: $($_.Exception.Message)"
+        }
+        Add-Hinweis "Standard-Apps von Hand setzen: $($kandidaten -join ', ')."
+    }
+}
+
 Write-Schritt "Zusammenfassung"
 Stop-Fortschritt
 
