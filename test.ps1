@@ -26,8 +26,14 @@ function Write-ErrorMsg {
     Write-Host "[-] $Message" -ForegroundColor Red
     $script:Fehlerliste.Add($Message)
 }
+# Sammelt offene Punkte. Aktuell nur Ablage: jeder Hinweis wird an seiner
+# Fundstelle bereits ausgegeben, eine Zusammenfassung am Ende gibt es nicht mehr.
 function Add-Hinweis  { param([string]$Message) $script:Hinweisliste.Add($Message) }
-function Add-Diagnose { param([string]$Message) $script:Diagnoseliste.Add($Message) }
+function Add-Diagnose {
+    param([string]$Message)
+    $script:Diagnoseliste.Add($Message)
+    Write-Host "[d] $Message" -ForegroundColor DarkGray
+}
 
 # --- Darstellung -------------------------------------------------------
 # Bewusst nur ASCII-Zeichen: Rahmenzeichen wie Doppelstriche kommen je nach
@@ -323,7 +329,6 @@ if ($systemSetup)              { $ablauf += 'Bloatware-Bereinigung' }
 if ($selectedApps.Count -gt 0) { $ablauf += 'App-Installation' }
 if ($systemSetup)              { $ablauf += 'Taskleiste' }
 if ($systemSetup)              { $ablauf += 'BitLocker-Abschluss' }
-$ablauf += 'Zusammenfassung'
 Set-Ablauf $ablauf
 
 Write-Host ""
@@ -1114,34 +1119,7 @@ if ($selectedApps.Count -gt 0) {
     }
 }
 
-Write-Schritt "Zusammenfassung"
 Stop-Fortschritt
-
-# Erst die Auswertung, ganz zum Schluss das Abschlussbanner - danach kommt
-# bewusst keine Ausgabe mehr.
-if ($script:Fehlerliste.Count -gt 0) {
-    Write-Host ""
-    Write-Host "  FEHLER ($($script:Fehlerliste.Count))" -ForegroundColor Red
-    Write-Linie '-' 'Red'
-    foreach ($f in $script:Fehlerliste) { Write-Host "   - $f" -ForegroundColor Red }
-} else {
-    Write-Host ""
-    Write-Host "  Keine Fehler aufgetreten." -ForegroundColor Green
-}
-
-if ($script:Hinweisliste.Count -gt 0) {
-    Write-Host ""
-    Write-Host "  NOCH ZU ERLEDIGEN ($($script:Hinweisliste.Count))" -ForegroundColor Yellow
-    Write-Linie '-' 'DarkYellow'
-    foreach ($h in $script:Hinweisliste) { Write-Host "   - $h" -ForegroundColor Yellow }
-}
-
-if ($script:Diagnoseliste.Count -gt 0) {
-    Write-Host ""
-    Write-Host "  DIAGNOSE (fuer die Skript-Pflege)" -ForegroundColor Magenta
-    Write-Linie '-' 'DarkGray'
-    foreach ($d in $script:Diagnoseliste) { Write-Host "   $d" -ForegroundColor Gray }
-}
 
 $abschlussFarbe = if ($script:Fehlerliste.Count -gt 0) { 'Yellow' } else { 'Green' }
 $abschlussText  = if ($script:Fehlerliste.Count -gt 0) {
@@ -1150,4 +1128,7 @@ $abschlussText  = if ($script:Fehlerliste.Count -gt 0) {
     "Ersteinrichtung erfolgreich abgeschlossen"
 }
 Write-Banner $abschlussText "" $abschlussFarbe
+
+# Haelt das Fenster offen, wenn das Skript per Doppelklick gestartet wurde.
 Write-Host ""
+Read-Host "  Druecke Enter um das Skript zu beenden..."
