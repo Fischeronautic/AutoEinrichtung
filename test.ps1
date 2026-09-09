@@ -36,14 +36,20 @@ function Set-RegValue {
         [string]$Path,
         [string]$Name,
         $Value,
-        [string]$Type = 'DWord'
+        [string]$Type = 'DWord',
+        [switch]$Leise
     )
     try {
         if (-not (Test-Path $Path)) { New-Item -Path $Path -Force -ErrorAction Stop | Out-Null }
         Set-ItemProperty -Path $Path -Name $Name -Value $Value -Type $Type -ErrorAction Stop
         return $true
     } catch {
-        Write-ErrorMsg "Registry '$Name' unter '$Path' fehlgeschlagen [$($_.Exception.GetType().Name)]: $($_.Exception.Message)"
+        $script:LetzterRegFehler = $_.Exception
+        # -Leise: Aufrufer bewertet den Fehlschlag selbst (z.B. wenn eine
+        # Richtlinie denselben Zweck bereits erfuellt).
+        if (-not $Leise) {
+            Write-ErrorMsg "Registry '$Name' unter '$Path' fehlgeschlagen [$($_.Exception.GetType().Name)]: $($_.Exception.Message)"
+        }
         return $false
     }
 }
@@ -299,13 +305,34 @@ if ($systemSetup) {
     Write-Info "Wende Windows 11 Registry-Anpassungen an..."
 
     $regPathAdvanced = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
+
+    # Widgets zuerst ueber die Richtlinie - das ist der von Microsoft
+    # unterstuetzte Weg und wirkt systemweit.
+    $okWidgets = Set-RegValue -Path "HKLM:\SOFTWARE\Policies\Microsoft\Dsh" -Name "AllowNewsAndInterests" -Value 0
+
     $okTaskbar = $true
-    $okTaskbar = (Set-RegValue -Path $regPathAdvanced -Name "TaskbarDa"          -Value 0) -and $okTaskbar   # Widgets
     $okTaskbar = (Set-RegValue -Path $regPathAdvanced -Name "TaskbarMn"          -Value 0) -and $okTaskbar   # Chat
     $okTaskbar = (Set-RegValue -Path $regPathAdvanced -Name "ShowTaskViewButton" -Value 0) -and $okTaskbar   # Task View
-    $okTaskbar = (Set-RegValue -Path "HKLM:\SOFTWARE\Policies\Microsoft\Dsh" -Name "AllowNewsAndInterests" -Value 0) -and $okTaskbar
 
-    if ($okTaskbar) {
+    # TaskbarDa (Widgets-Button des Benutzers) wird seit Windows 11 24H2 vom
+    # UserChoice Protection Driver (UCPD) blockiert - der Schreibversuch endet
+    # mit UnauthorizedAccessException. UCPD dafuer abzuschalten waere
+    # unverhaeltnismaessig, der Treiber schuetzt auch Standard-Apps und
+    # Dateizuordnungen. Solange die Richtlinie oben sitzt, wird der Wert
+    # ohnehin nicht gebraucht.
+    if (-not (Set-RegValue -Path $regPathAdvanced -Name "TaskbarDa" -Value 0 -Leise)) {
+        if ($okWidgets) {
+            Write-Info "TaskbarDa ist von Windows gesperrt (UCPD) - nicht noetig, die Widgets-Richtlinie greift bereits."
+        } else {
+            Write-ErrorMsg "Widgets konnten weder per Richtlinie noch ueber TaskbarDa deaktiviert werden."
+            $okTaskbar = $false
+        }
+        if ($script:LetzterRegFehler) {
+            Add-Diagnose "TaskbarDa gesperrt [$($script:LetzterRegFehler.GetType().Name)]: $($script:LetzterRegFehler.Message)"
+        }
+    }
+
+    if ($okTaskbar -and $okWidgets) {
         Write-Success "System-Icons (Widgets, Chat, Task View) erfolgreich entfernt."
     } else {
         Write-Warn "Taskleisten-Icons nur teilweise entfernt - siehe Fehler oben."
@@ -761,7 +788,34 @@ if ($selectedApps.Count -gt 0) {
 if ($systemSetup) {
     Write-Info "Raeume Taskleiste auf und pinne nur den Explorer..."
 
-    $layoutXml = @'
+    # Pin-Liste dynamisch aufbauen: Explorer immer, Browser nur wenn wirklich
+    # installiert - ein Pin auf eine fehlende Verknuepfung wird ignoriert und
+    # laesst die Taskleiste luecken.
+    $pinMuster = @('Google Chrome', 'Firefox')
+    $startMenues = @(
+        @{ Basis = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs"; Var = '%ProgramData%\Microsoft\Windows\Start Menu\Programs' },
+        @{ Basis = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs";     Var = '%APPDATA%\Microsoft\Windows\Start Menu\Programs' }
+    )
+
+    $pinZeilen = New-Object System.Collections.Generic.List[string]
+    $pinZeilen.Add('        <taskbar:DesktopApp DesktopApplicationID="Microsoft.Windows.Explorer" />')
+
+    foreach ($muster in $pinMuster) {
+        foreach ($sm in $startMenues) {
+            if (-not (Test-Path $sm.Basis)) { continue }
+            $lnk = Get-ChildItem -Path $sm.Basis -Filter '*.lnk' -ErrorAction SilentlyContinue |
+                   Where-Object { $_.BaseName -like "$muster*" } |
+                   Select-Object -First 1
+            if ($lnk) {
+                $pfad = ("$($sm.Var)\$($lnk.Name)") -replace '&', '&amp;'
+                $pinZeilen.Add("        <taskbar:DesktopApp DesktopApplicationLinkPath=`"$pfad`" />")
+                Write-Info "Taskleiste: '$($lnk.BaseName)' wird angepinnt."
+                break
+            }
+        }
+    }
+
+    $layoutXml = @"
 <?xml version="1.0" encoding="utf-8"?>
 <LayoutModificationTemplate
     xmlns="http://schemas.microsoft.com/Start/2014/LayoutModification"
@@ -772,12 +826,12 @@ if ($systemSetup) {
   <CustomTaskbarLayoutCollection PinListPlacement="Replace">
     <defaultlayout:TaskbarLayout>
       <taskbar:TaskbarPinList>
-        <taskbar:DesktopApp DesktopApplicationID="Microsoft.Windows.Explorer" />
+$($pinZeilen -join "`r`n")
       </taskbar:TaskbarPinList>
     </defaultlayout:TaskbarLayout>
   </CustomTaskbarLayoutCollection>
 </LayoutModificationTemplate>
-'@
+"@
 
     # XML fuer den aktuellen Benutzer UND fuer kuenftige neue Konten (Default-Profil) ablegen.
     $layoutZiele = @(
