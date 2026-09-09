@@ -29,6 +29,44 @@ function Write-ErrorMsg {
 function Add-Hinweis  { param([string]$Message) $script:Hinweisliste.Add($Message) }
 function Add-Diagnose { param([string]$Message) $script:Diagnoseliste.Add($Message) }
 
+# --- Darstellung -------------------------------------------------------
+# Bewusst nur ASCII-Zeichen: Rahmenzeichen wie Doppelstriche kommen je nach
+# Konsolen-Codepage als Fragezeichen an.
+$script:Breite        = 62
+$script:Schritte      = @()
+$script:SchrittNr     = 0
+
+function Write-Linie { param([string]$Zeichen = '-', [ConsoleColor]$Farbe = 'DarkGray')
+    Write-Host ($Zeichen * $script:Breite) -ForegroundColor $Farbe
+}
+
+function Write-Banner {
+    param([string]$Titel, [string]$Untertitel = '', [ConsoleColor]$Farbe = 'Cyan')
+    Write-Host ""
+    Write-Linie '=' $Farbe
+    Write-Host ("  " + $Titel.ToUpper()) -ForegroundColor $Farbe
+    if ($Untertitel) { Write-Host ("  " + $Untertitel) -ForegroundColor DarkGray }
+    Write-Linie '=' $Farbe
+}
+
+# Legt fest, welche Schritte dieser Durchlauf hat - der Zaehler stimmt
+# dadurch auch, wenn nur Apps oder nur die Systemeinrichtung laeuft.
+function Set-Ablauf { param([string[]]$Titel) $script:Schritte = $Titel; $script:SchrittNr = 0 }
+
+function Write-Schritt {
+    param([string]$Titel)
+    $script:SchrittNr++
+    $gesamt = [math]::Max(1, $script:Schritte.Count)
+    Write-Host ""
+    Write-Linie '-' 'DarkCyan'
+    Write-Host ("  [Schritt $($script:SchrittNr) von $gesamt]  $Titel") -ForegroundColor White
+    Write-Linie '-' 'DarkCyan'
+    Write-Progress -Activity "Windows 11 Ersteinrichtung" -Status "Schritt $($script:SchrittNr)/$gesamt - $Titel" `
+                   -PercentComplete ([int](100 * ($script:SchrittNr - 1) / $gesamt))
+}
+
+function Stop-Fortschritt { Write-Progress -Activity "Windows 11 Ersteinrichtung" -Completed }
+
 # Setzt einen Registry-Wert und legt den Pfad bei Bedarf an.
 # Meldet EHRLICH zurueck, ob es geklappt hat (kein SilentlyContinue im try-Block!).
 function Set-RegValue {
@@ -109,6 +147,7 @@ if (-not $isAdmin) {
     return
 }
 
+Write-Banner "Windows 11 Ersteinrichtung" "Basis-Einstellungen, Bloatware und Apps"
 Write-Success "Administratorrechte erfolgreich bestaetigt."
 
 # Internet-Pruefung: erst HTTP (ICMP wird in vielen Netzen geblockt), dann Ping als Fallback.
@@ -165,6 +204,59 @@ $wingetApps = [ordered]@{
 # Standard-Paket fuer die Schnellauswahl (Adobe zuletzt, da interaktiv)
 $standardApps = @('1', '2', '4', '3')
 
+# App-Auswahl per Klickliste (Out-GridView). Faellt automatisch auf die
+# Nummerneingabe zurueck, wenn Out-GridView nicht vorhanden ist oder das
+# Fenster nicht geoeffnet werden kann.
+function Select-Apps {
+    param([System.Collections.Specialized.OrderedDictionary]$Apps)
+
+    $liste = foreach ($key in $Apps.Keys) {
+        [pscustomobject]@{
+            Nr    = [int]$key
+            App   = $Apps[$key].Name
+            Paket = $(if ($Apps[$key].Id) { $Apps[$key].Id } else { 'Office Deployment Tool' })
+        }
+    }
+
+    if (Get-Command Out-GridView -ErrorAction SilentlyContinue) {
+        try {
+            Write-Info "Auswahlfenster wurde geoeffnet - mehrere Eintraege mit gedrueckter Strg-Taste anklicken, dann OK."
+            $auswahl = $liste | Sort-Object Nr |
+                       Out-GridView -Title "Apps auswaehlen (Mehrfachauswahl mit Strg) - dann auf OK klicken" -PassThru
+            return @($auswahl | ForEach-Object { "$($_.Nr)" })
+        } catch {
+            Write-Warn "Auswahlfenster nicht verfuegbar ($($_.Exception.Message)) - bitte Nummern eintippen."
+        }
+    } else {
+        Write-Warn "Auswahlfenster nicht verfuegbar - bitte Nummern eintippen."
+    }
+
+    # --- Fallback: Nummerneingabe ---
+    Write-Host ""
+    Write-Host "  Verfuegbare Apps:" -ForegroundColor Cyan
+    foreach ($key in $Apps.Keys) {
+        Write-Host ("   [{0,2}] {1}" -f $key, $Apps[$key].Name)
+    }
+    Write-Host ""
+
+    $eingabe = (Read-Host "  Nummern getrennt durch Leerzeichen (z.B. '1 4 10')").Trim()
+    if ([string]::IsNullOrWhiteSpace($eingabe)) { return @() }
+
+    $treffer = @()
+    $ungueltig = @()
+    foreach ($teil in ($eingabe -split '[\s,;]+' | Where-Object { $_ })) {
+        $nummer = 0
+        # ueber int parsen, damit '04' und '4' gleich behandelt werden
+        if ([int]::TryParse($teil, [ref]$nummer) -and $Apps.Contains("$nummer")) {
+            $treffer += "$nummer"
+        } else {
+            $ungueltig += $teil
+        }
+    }
+    if ($ungueltig.Count -gt 0) { Write-Warn "Ungueltige Eingaben ignoriert: $($ungueltig -join ', ')" }
+    return @($treffer)
+}
+
 $systemSetup  = $true
 $selectedApps = @()
 
@@ -173,19 +265,16 @@ if (-not $wingetVerfuegbar) {
     Write-Warn "Es wird nur die Systemeinrichtung ausgefuehrt (winget fehlt)."
 } else {
 
-    Write-Host ""
-    Write-Host "========================================" -ForegroundColor Magenta
-    Write-Host "    APP-INSTALLATIONSMENUE (WINGET)" -ForegroundColor Cyan
-    Write-Host "========================================" -ForegroundColor Magenta
-    Write-Host "[1] Standard-Apps installieren (7-Zip, Chrome, Firefox DE, Adobe Acrobat Reader)"
-    Write-Host "[2] Manuelle Auswahl (Eingabe von Nummern)"
-    Write-Host "[3] NUR Apps installieren (manuelle Auswahl, ohne Systemeinrichtung)"
-    Write-Host "[0] Abbrechen"
-    Write-Host "========================================" -ForegroundColor Magenta
+    Write-Banner "App-Installation" "winget" 'Magenta'
+    Write-Host "   [1] Standard-Apps (7-Zip, Chrome, Firefox DE, Adobe Acrobat Reader)"
+    Write-Host "   [2] Apps auswaehlen        - Systemeinrichtung laeuft mit"
+    Write-Host "   [3] NUR Apps auswaehlen    - Systemeinrichtung wird uebersprungen"
+    Write-Host "   [0] Abbrechen"
+    Write-Linie '=' 'Magenta'
 
     # Eingabe wird SOFORT validiert - nicht erst 10 Minuten spaeter beim Installieren.
     do {
-        $menuChoice = (Read-Host "Bitte waehle eine Option").Trim()
+        $menuChoice = (Read-Host "  Bitte waehle eine Option").Trim()
         if ($menuChoice -notin @('0', '1', '2', '3')) { Write-Warn "Ungueltige Eingabe. Bitte 0, 1, 2 oder 3 eingeben." }
     } while ($menuChoice -notin @('0', '1', '2', '3'))
 
@@ -201,42 +290,19 @@ if (-not $wingetVerfuegbar) {
         $selectedApps = $standardApps
     }
     else {
-        Write-Host ""
-        Write-Host "--- Verfuegbare Apps ---" -ForegroundColor Cyan
-        foreach ($key in $wingetApps.Keys) {
-            Write-Host ("[{0,2}] {1}" -f $key, $wingetApps[$key].Name)
-        }
-
         do {
-            $eingabe = (Read-Host "Gewuenschte Nummern getrennt durch Leerzeichen (z.B. '1 4 10')").Trim()
+            $selectedApps = @(Select-Apps -Apps $wingetApps | Select-Object -Unique)
 
-            if ([string]::IsNullOrWhiteSpace($eingabe)) {
+            if ($selectedApps.Count -eq 0) {
                 if ($menuChoice -eq '3') {
                     # Ohne Apps und ohne Systemeinrichtung gaebe es nichts zu tun.
                     Write-Warn "Bei 'Nur Apps' muss mindestens eine App gewaehlt werden."
-                    continue
-                }
-                Write-Warn "Keine Apps ausgewaehlt - es laeuft nur die Systemeinrichtung."
-                $selectedApps = @()
-                break
-            }
-
-            $selectedApps = @()
-            $ungueltig = @()
-            foreach ($teil in ($eingabe -split '[\s,;]+' | Where-Object { $_ })) {
-                $nummer = 0
-                # ueber int parsen, damit '04' und '4' gleich behandelt werden
-                if ([int]::TryParse($teil, [ref]$nummer) -and $wingetApps.Contains("$nummer")) {
-                    $selectedApps += "$nummer"
                 } else {
-                    $ungueltig += $teil
+                    Write-Warn "Keine Apps ausgewaehlt - es laeuft nur die Systemeinrichtung."
+                    break
                 }
             }
-            if ($ungueltig.Count -gt 0) { Write-Warn "Ungueltige Eingaben ignoriert: $($ungueltig -join ', ')" }
-            if ($selectedApps.Count -eq 0) { Write-Warn "Keine gueltige Nummer erkannt. Bitte erneut eingeben." }
         } while ($selectedApps.Count -eq 0)
-
-        $selectedApps = @($selectedApps | Select-Object -Unique)
     }
 
     if ($selectedApps.Count -gt 0) {
@@ -247,6 +313,18 @@ if (-not $wingetVerfuegbar) {
         Write-Info "Systemeinrichtung wird uebersprungen - es werden nur Apps installiert."
     }
 }
+
+# Schrittliste passend zum gewaehlten Modus - der Zaehler stimmt dadurch
+# auch, wenn nur Apps oder nur die Systemeinrichtung laeuft.
+$ablauf = @()
+if ($systemSetup)              { $ablauf += 'Zeit und BitLocker' }
+if ($systemSetup)              { $ablauf += 'Windows-Anpassungen' }
+if ($systemSetup)              { $ablauf += 'Bloatware-Bereinigung' }
+if ($selectedApps.Count -gt 0) { $ablauf += 'App-Installation' }
+if ($systemSetup)              { $ablauf += 'Taskleiste' }
+if ($systemSetup)              { $ablauf += 'BitLocker-Abschluss' }
+$ablauf += 'Zusammenfassung'
+Set-Ablauf $ablauf
 
 Write-Host ""
 Write-Success "Auswahl gespeichert! Das Skript arbeitet den Rest nun weitgehend automatisch ab."
@@ -259,6 +337,7 @@ Write-Host ""
 $bitlockerVerfuegbar = $false
 
 if ($systemSetup) {
+    Write-Schritt "Zeit und BitLocker"
     Write-Info "Synchronisiere Windows-Zeit..."
     try {
         Start-Service w32time -ErrorAction Stop
@@ -302,6 +381,7 @@ if ($systemSetup) {
 # 4. Windows 11 Anpassungen via Registry & Autostart
 # ==========================================
 if ($systemSetup) {
+    Write-Schritt "Windows-Anpassungen"
     Write-Info "Wende Windows 11 Registry-Anpassungen an..."
 
     $regPathAdvanced = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
@@ -418,6 +498,7 @@ if ($systemSetup) {
 # 5. Bloatware-Bereinigung (Muellschlucker)
 # ==========================================
 if ($systemSetup) {
+    Write-Schritt "Bloatware-Bereinigung"
     Write-Info "Starte Bloatware-Bereinigung (Suche nach Junk-Apps)..."
     $bloatwareList = @("McAfee", "WebAdvisor", "Norton", "ExpressVPN", "Dropbox", "TikTok", "Instagram", "Facebook", "Spotify", "WhatsApp")
 
@@ -734,10 +815,8 @@ function Install-Outlook {
 }
 
 if ($selectedApps.Count -gt 0) {
-    Write-Host ""
-    Write-Host "========================================" -ForegroundColor Magenta
-    Write-Host "    FUEHRE GEWAEHLTE APP-INSTALLATION AUS" -ForegroundColor Cyan
-    Write-Host "========================================" -ForegroundColor Magenta
+    Write-Schritt "App-Installation"
+    Write-Info "Wird installiert: $((($selectedApps | ForEach-Object { $wingetApps[$_].Name })) -join ', ')"
 
     # Offene GUI-Deinstallationen (McAfee & Co.) zuerst abwarten - sonst
     # blockieren sie die App-Installation mit MSI-Exitcode 1618.
@@ -790,7 +869,8 @@ if ($selectedApps.Count -gt 0) {
 # (CustomTaskbarLayoutCollection / TaskbarPinList) - NICHT ueber JSON.
 # Die JSON-Variante mit "taskbarActions" hat nie etwas bewirkt.
 if ($systemSetup) {
-    Write-Info "Raeume Taskleiste auf und pinne nur den Explorer..."
+    Write-Schritt "Taskleiste"
+    Write-Info "Raeume Taskleiste auf und setze die Pins..."
 
     # Pin-Liste dynamisch aufbauen: Explorer immer, Browser nur wenn wirklich
     # installiert - ein Pin auf eine fehlende Verknuepfung wird ignoriert und
@@ -903,8 +983,11 @@ $($pinZeilen -join "`r`n")
 # ==========================================
 # 8. Abschluss-Pruefung (BitLocker)
 # ==========================================
-if ($systemSetup -and $bitlockerVerfuegbar) {
-    Write-Host ""
+if ($systemSetup) {
+    Write-Schritt "BitLocker-Abschluss"
+  if (-not $bitlockerVerfuegbar) {
+    Write-Info "BitLocker-Cmdlets nicht vorhanden - nichts zu pruefen."
+  } else {
     Write-Info "Warte auf Abschluss der BitLocker-Entschluesselung (falls noch aktiv)..."
     try {
         $blEnd = Get-BitLockerVolume -MountPoint "C:" -ErrorAction Stop
@@ -937,35 +1020,45 @@ if ($systemSetup -and $bitlockerVerfuegbar) {
     } catch {
         Write-Warn "BitLocker-Abschlusspruefung konnte nicht durchgefuehrt werden: $($_.Exception.Message)"
     }
+  }
 }
 
 # ==========================================
 # 9. Ergebnis-Protokoll
 # ==========================================
-Write-Host ""
-Write-Host "=================================================" -ForegroundColor Green
-Write-Host " Ersteinrichtung abgeschlossen "                   -ForegroundColor Green
-Write-Host "=================================================" -ForegroundColor Green
+Write-Schritt "Zusammenfassung"
+Stop-Fortschritt
+
+$abschlussFarbe = if ($script:Fehlerliste.Count -gt 0) { 'Yellow' } else { 'Green' }
+$abschlussText  = if ($script:Fehlerliste.Count -gt 0) {
+    "Ersteinrichtung beendet - $($script:Fehlerliste.Count) Punkt(e) haben nicht geklappt"
+} else {
+    "Ersteinrichtung erfolgreich abgeschlossen"
+}
+Write-Banner $abschlussText "" $abschlussFarbe
 
 if ($script:Fehlerliste.Count -gt 0) {
     Write-Host ""
-    Write-Host "FEHLER ($($script:Fehlerliste.Count)):" -ForegroundColor Red
-    foreach ($f in $script:Fehlerliste) { Write-Host "  - $f" -ForegroundColor Red }
+    Write-Host "  FEHLER ($($script:Fehlerliste.Count))" -ForegroundColor Red
+    Write-Linie '-' 'Red'
+    foreach ($f in $script:Fehlerliste) { Write-Host "   - $f" -ForegroundColor Red }
 } else {
     Write-Host ""
-    Write-Host "Keine Fehler aufgetreten." -ForegroundColor Green
+    Write-Host "  Keine Fehler aufgetreten." -ForegroundColor Green
 }
 
 if ($script:Hinweisliste.Count -gt 0) {
     Write-Host ""
-    Write-Host "NOCH ZU ERLEDIGEN ($($script:Hinweisliste.Count)):" -ForegroundColor Yellow
-    foreach ($h in $script:Hinweisliste) { Write-Host "  - $h" -ForegroundColor Yellow }
+    Write-Host "  NOCH ZU ERLEDIGEN ($($script:Hinweisliste.Count))" -ForegroundColor Yellow
+    Write-Linie '-' 'DarkYellow'
+    foreach ($h in $script:Hinweisliste) { Write-Host "   - $h" -ForegroundColor Yellow }
 }
 
 if ($script:Diagnoseliste.Count -gt 0) {
     Write-Host ""
-    Write-Host "DIAGNOSE (fuer die Skript-Pflege):" -ForegroundColor Magenta
-    foreach ($d in $script:Diagnoseliste) { Write-Host "  $d" -ForegroundColor Gray }
+    Write-Host "  DIAGNOSE (fuer die Skript-Pflege)" -ForegroundColor Magenta
+    Write-Linie '-' 'DarkGray'
+    foreach ($d in $script:Diagnoseliste) { Write-Host "   $d" -ForegroundColor Gray }
 }
 
 # Komplettes Protokoll als Datei ablegen - lange Fehlermeldungen sind in der
@@ -1005,4 +1098,5 @@ try {
 }
 
 Write-Host ""
-Read-Host "Druecke Enter um das Skript zu beenden..."
+Write-Linie '=' 'DarkGray'
+Read-Host "  Druecke Enter um das Skript zu beenden..."
