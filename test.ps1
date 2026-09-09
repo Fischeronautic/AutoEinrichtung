@@ -11,7 +11,7 @@
 $ProgressPreference = 'SilentlyContinue'
 
 # ==========================================
-# 0. UI-Hilfsfunktionen & Ergebnis-Protokoll
+# 0. UI-Hilfsfunktionen & Ergebnis-Sammlung
 # ==========================================
 $script:Fehlerliste  = New-Object System.Collections.Generic.List[string]
 $script:Hinweisliste = New-Object System.Collections.Generic.List[string]
@@ -1024,19 +1024,13 @@ if ($systemSetup) {
 }
 
 # ==========================================
-# 9. Ergebnis-Protokoll
+# 9. Zusammenfassung
 # ==========================================
 Write-Schritt "Zusammenfassung"
 Stop-Fortschritt
 
-$abschlussFarbe = if ($script:Fehlerliste.Count -gt 0) { 'Yellow' } else { 'Green' }
-$abschlussText  = if ($script:Fehlerliste.Count -gt 0) {
-    "Ersteinrichtung beendet - $($script:Fehlerliste.Count) Punkt(e) haben nicht geklappt"
-} else {
-    "Ersteinrichtung erfolgreich abgeschlossen"
-}
-Write-Banner $abschlussText "" $abschlussFarbe
-
+# Erst die Auswertung, ganz zum Schluss das Abschlussbanner - danach kommt
+# bewusst keine Ausgabe mehr.
 if ($script:Fehlerliste.Count -gt 0) {
     Write-Host ""
     Write-Host "  FEHLER ($($script:Fehlerliste.Count))" -ForegroundColor Red
@@ -1061,42 +1055,11 @@ if ($script:Diagnoseliste.Count -gt 0) {
     foreach ($d in $script:Diagnoseliste) { Write-Host "   $d" -ForegroundColor Gray }
 }
 
-# Komplettes Protokoll als Datei ablegen - lange Fehlermeldungen sind in der
-# Konsole oft abgeschnitten oder von Installationsfenstern verdeckt.
-$protokoll = New-Object System.Collections.Generic.List[string]
-$protokoll.Add("AutoEinrichtung - Protokoll vom $(Get-Date -Format 'dd.MM.yyyy HH:mm:ss')")
-$protokoll.Add("Computer: $env:COMPUTERNAME   Benutzer: $env:USERNAME")
-$protokoll.Add("Windows:  $((Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).Caption) / Build $([System.Environment]::OSVersion.Version)")
-$protokoll.Add("PowerShell: $($PSVersionTable.PSVersion)  ($(if ([Environment]::Is64BitProcess) { '64-Bit' } else { '32-BIT!' }))")
-$protokoll.Add("")
-
-$protokoll.Add("--- FEHLER ($($script:Fehlerliste.Count)) ---")
-if ($script:Fehlerliste.Count -gt 0) { foreach ($f in $script:Fehlerliste) { $protokoll.Add("  $f") } }
-else { $protokoll.Add("  keine") }
-$protokoll.Add("")
-
-$protokoll.Add("--- NOCH ZU ERLEDIGEN ($($script:Hinweisliste.Count)) ---")
-if ($script:Hinweisliste.Count -gt 0) { foreach ($h in $script:Hinweisliste) { $protokoll.Add("  $h") } }
-else { $protokoll.Add("  keine") }
-$protokoll.Add("")
-
-$protokoll.Add("--- DIAGNOSE ($($script:Diagnoseliste.Count)) ---")
-if ($script:Diagnoseliste.Count -gt 0) { foreach ($d in $script:Diagnoseliste) { $protokoll.Add("  $d") } }
-else { $protokoll.Add("  keine") }
-
-# Ueber die Shell-Funktion, damit ein per OneDrive umgeleiteter Desktop stimmt.
-$desktop = [Environment]::GetFolderPath('Desktop')
-if ([string]::IsNullOrWhiteSpace($desktop)) { $desktop = Join-Path $env:USERPROFILE 'Desktop' }
-$protokollDatei = Join-Path $desktop "AutoEinrichtung_Protokoll.txt"
-
-try {
-    Set-Content -Path $protokollDatei -Value $protokoll -Encoding UTF8 -Force -ErrorAction Stop
-    Write-Host ""
-    Write-Success "Protokoll gespeichert unter: $protokollDatei"
-} catch {
-    Write-Warn "Protokoll konnte nicht gespeichert werden: $($_.Exception.Message)"
+$abschlussFarbe = if ($script:Fehlerliste.Count -gt 0) { 'Yellow' } else { 'Green' }
+$abschlussText  = if ($script:Fehlerliste.Count -gt 0) {
+    "Ersteinrichtung beendet - $($script:Fehlerliste.Count) Punkt(e) haben nicht geklappt"
+} else {
+    "Ersteinrichtung erfolgreich abgeschlossen"
 }
-
+Write-Banner $abschlussText "" $abschlussFarbe
 Write-Host ""
-Write-Linie '=' 'DarkGray'
-Read-Host "  Druecke Enter um das Skript zu beenden..."
