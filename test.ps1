@@ -43,7 +43,7 @@ function Set-RegValue {
         Set-ItemProperty -Path $Path -Name $Name -Value $Value -Type $Type -ErrorAction Stop
         return $true
     } catch {
-        Write-ErrorMsg "Registry '$Name' unter '$Path' fehlgeschlagen: $($_.Exception.Message)"
+        Write-ErrorMsg "Registry '$Name' unter '$Path' fehlgeschlagen [$($_.Exception.GetType().Name)]: $($_.Exception.Message)"
         return $false
     }
 }
@@ -146,7 +146,7 @@ if (-not $wingetVerfuegbar) {
 $wingetApps = [ordered]@{
     '1'  = @{ Name = "7-Zip";                                     Id = "7zip.7zip" }
     '2'  = @{ Name = "Google Chrome";                              Id = "Google.Chrome" }
-    '3'  = @{ Name = "Adobe Acrobat Reader";                       Id = "Adobe.Acrobat.Reader.32-bit"; Interactive = $true }
+    '3'  = @{ Name = "Adobe Acrobat Reader";                       Id = "Adobe.Acrobat.Reader.32-bit" }
     '4'  = @{ Name = "Mozilla Firefox (Deutsch)";                  Id = "Mozilla.Firefox.de" }
     '5'  = @{ Name = "LibreOffice";                                Id = "TheDocumentFoundation.LibreOffice" }
     '6'  = @{ Name = "Thunderbird (Deutsch)";                      Id = "Mozilla.Thunderbird.de" }
@@ -244,9 +244,6 @@ if (-not $wingetVerfuegbar) {
 
 Write-Host ""
 Write-Success "Auswahl gespeichert! Das Skript arbeitet den Rest nun weitgehend automatisch ab."
-if ($selectedApps -contains '3') {
-    Write-Warn "Hinweis: Adobe Acrobat Reader oeffnet ein eigenes Installationsfenster."
-}
 Start-Sleep -Seconds 2
 Write-Host ""
 
@@ -895,18 +892,44 @@ if ($script:Hinweisliste.Count -gt 0) {
 
 if ($script:Diagnoseliste.Count -gt 0) {
     Write-Host ""
-    Write-Host "DIAGNOSE (fuer die Skript-Pflege - bitte kopieren):" -ForegroundColor Magenta
+    Write-Host "DIAGNOSE (fuer die Skript-Pflege):" -ForegroundColor Magenta
     foreach ($d in $script:Diagnoseliste) { Write-Host "  $d" -ForegroundColor Gray }
+}
 
-    # Zusaetzlich als Datei ablegen, damit man es nicht aus der Konsole abtippen muss.
-    $diagDatei = Join-Path $env:USERPROFILE "Desktop\AutoEinrichtung_Diagnose.txt"
-    try {
-        Set-Content -Path $diagDatei -Value $script:Diagnoseliste -Encoding UTF8 -Force -ErrorAction Stop
-        Write-Host ""
-        Write-Success "Diagnose gespeichert unter: $diagDatei"
-    } catch {
-        Write-Warn "Diagnose konnte nicht auf dem Desktop gespeichert werden: $($_.Exception.Message)"
-    }
+# Komplettes Protokoll als Datei ablegen - lange Fehlermeldungen sind in der
+# Konsole oft abgeschnitten oder von Installationsfenstern verdeckt.
+$protokoll = New-Object System.Collections.Generic.List[string]
+$protokoll.Add("AutoEinrichtung - Protokoll vom $(Get-Date -Format 'dd.MM.yyyy HH:mm:ss')")
+$protokoll.Add("Computer: $env:COMPUTERNAME   Benutzer: $env:USERNAME")
+$protokoll.Add("Windows:  $((Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).Caption) / Build $([System.Environment]::OSVersion.Version)")
+$protokoll.Add("PowerShell: $($PSVersionTable.PSVersion)  ($(if ([Environment]::Is64BitProcess) { '64-Bit' } else { '32-BIT!' }))")
+$protokoll.Add("")
+
+$protokoll.Add("--- FEHLER ($($script:Fehlerliste.Count)) ---")
+if ($script:Fehlerliste.Count -gt 0) { foreach ($f in $script:Fehlerliste) { $protokoll.Add("  $f") } }
+else { $protokoll.Add("  keine") }
+$protokoll.Add("")
+
+$protokoll.Add("--- NOCH ZU ERLEDIGEN ($($script:Hinweisliste.Count)) ---")
+if ($script:Hinweisliste.Count -gt 0) { foreach ($h in $script:Hinweisliste) { $protokoll.Add("  $h") } }
+else { $protokoll.Add("  keine") }
+$protokoll.Add("")
+
+$protokoll.Add("--- DIAGNOSE ($($script:Diagnoseliste.Count)) ---")
+if ($script:Diagnoseliste.Count -gt 0) { foreach ($d in $script:Diagnoseliste) { $protokoll.Add("  $d") } }
+else { $protokoll.Add("  keine") }
+
+# Ueber die Shell-Funktion, damit ein per OneDrive umgeleiteter Desktop stimmt.
+$desktop = [Environment]::GetFolderPath('Desktop')
+if ([string]::IsNullOrWhiteSpace($desktop)) { $desktop = Join-Path $env:USERPROFILE 'Desktop' }
+$protokollDatei = Join-Path $desktop "AutoEinrichtung_Protokoll.txt"
+
+try {
+    Set-Content -Path $protokollDatei -Value $protokoll -Encoding UTF8 -Force -ErrorAction Stop
+    Write-Host ""
+    Write-Success "Protokoll gespeichert unter: $protokollDatei"
+} catch {
+    Write-Warn "Protokoll konnte nicht gespeichert werden: $($_.Exception.Message)"
 }
 
 Write-Host ""
