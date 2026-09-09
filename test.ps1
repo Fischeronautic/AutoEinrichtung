@@ -602,10 +602,34 @@ function Install-WingetApp {
 function Install-Outlook {
     Write-Info "Installiere klassisches Outlook in die vorhandene Microsoft-365-Installation..."
 
-    $c2rPfad = "HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration"
-    if (-not (Test-Path $c2rPfad)) {
-        Write-ErrorMsg "Keine Microsoft-365-Installation (Click-to-Run) gefunden. Outlook kann so nicht nachinstalliert werden."
-        Add-Hinweis "Outlook: kein vorhandenes Microsoft 365 gefunden - Office zuerst ueber das Kundenkonto installieren."
+    # Beide Registry-Sichten pruefen: laeuft das Skript in einer 32-Bit-PowerShell,
+    # zeigt HKLM:\SOFTWARE auf WOW6432Node und der echte Key bleibt unsichtbar.
+    $c2rPfad = @(
+        "HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Office\ClickToRun\Configuration"
+    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+    if (-not $c2rPfad) {
+        # Nachsehen, ob ueberhaupt irgendein Office vorhanden ist - das
+        # unterscheidet 'leere Maschine' von 'Office da, aber unlesbar'.
+        $officeSpuren = @(Get-ItemProperty @(
+                "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+                "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+            ) -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -match 'Microsoft 365|Microsoft Office' } |
+            Select-Object -ExpandProperty DisplayName -Unique)
+
+        if ($officeSpuren.Count -gt 0) {
+            Write-ErrorMsg "Office ist installiert, aber die Click-to-Run-Konfiguration fehlt. Outlook kann nicht nachgetragen werden."
+            Write-Warn "Gefundene Office-Eintraege: $($officeSpuren -join ', ')"
+            Add-Diagnose "Kein ClickToRun\Configuration-Key, aber Office vorhanden: $($officeSpuren -join ' | ')"
+            Add-Hinweis "Outlook: Office-Installation pruefen (evtl. MSI-Version statt Click-to-Run)."
+        } else {
+            Write-ErrorMsg "Auf diesem Geraet ist kein Office installiert. Outlook laesst sich nur in eine vorhandene Microsoft-365-Installation nachtragen."
+            Write-Info "Auf einer frischen VM ohne Office ist das das erwartete Verhalten."
+            Add-Diagnose "Weder ClickToRun-Key noch Office-Eintraege gefunden - Geraet ohne Office."
+            Add-Hinweis "Outlook: erst Office ueber das Kundenkonto installieren, dann dieses Skript nochmal mit Punkt 10 starten."
+        }
         return
     }
 
@@ -710,8 +734,14 @@ if ($selectedApps.Count -gt 0) {
     # Quellen aktualisieren - auf frisch aufgesetzten Geraeten ist der
     # winget-Index oft veraltet, was zu sporadischen Fehlschlaegen fuehrt.
     Write-Info "Aktualisiere winget-Paketquellen..."
-    $null = & winget.exe source update --accept-source-agreements 2>&1
-    if ($LASTEXITCODE -ne 0) { Write-Warn "winget source update lieferte Exitcode $LASTEXITCODE (wird ignoriert)." }
+    # Achtung: 'source update' kennt KEIN --accept-source-agreements.
+    # Der Schalter fuehrt zu 0x8A150002 (ungueltige Argumente).
+    $null = & winget.exe source update --disable-interactivity 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "Paketquellen aktualisiert."
+    } else {
+        Write-Warn "winget source update lieferte Exitcode $LASTEXITCODE (wird ignoriert)."
+    }
 
     foreach ($nummer in $selectedApps) {
         $app = $wingetApps[$nummer]
