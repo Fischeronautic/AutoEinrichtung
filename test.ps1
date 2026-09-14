@@ -204,7 +204,7 @@ $wingetApps = [ordered]@{
     '7'  = @{ Name = "TeamViewer";                                 Id = "TeamViewer.TeamViewer" }
     '8'  = @{ Name = "Sumatra PDF (Sehr schnelle Alternative)";    Id = "SumatraPDF.SumatraPDF" }
     '9'  = @{ Name = "Foxit PDF Reader (Gute Adobe-Alternative)";  Id = "Foxit.FoxitReader" }
-    '10' = @{ Name = "Outlook klassisch (in vorhandenes M365 nachinstallieren)"; Custom = "Outlook" }
+    '10' = @{ Name = "Outlook klassisch (Microsoft 365)"; Custom = "Outlook" }
 }
 
 # Standard-Paket fuer die Schnellauswahl (Adobe zuletzt, da interaktiv)
@@ -772,65 +772,61 @@ function Install-WingetApp {
 #
 # WICHTIG: --override ERSETZT die Installer-Argumente. Nur '/configure <xml>' ist
 # hier gueltig - ein 'Language=de-de' allein wuerde nichts bewirken.
-function Install-Outlook {
-    Write-Info "Installiere klassisches Outlook in die vorhandene Microsoft-365-Installation..."
+function Test-OutlookVorhanden {
+    $pfade = @(
+        (Join-Path $env:ProgramFiles 'Microsoft Office\root\Office16\OUTLOOK.EXE'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Office\root\Office16\OUTLOOK.EXE')
+    )
+    foreach ($pfad in $pfade) {
+        if ($pfad -and (Test-Path $pfad)) { return $true }
+    }
+    foreach ($schluessel in @("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\OUTLOOK.EXE",
+                              "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\OUTLOOK.EXE")) {
+        if (Test-Path $schluessel) { return $true }
+    }
+    return $false
+}
 
-    # Beide Registry-Sichten pruefen: laeuft das Skript in einer 32-Bit-PowerShell,
-    # zeigt HKLM:\SOFTWARE auf WOW6432Node und der echte Key bleibt unsichtbar.
+# Installiert Microsoft 365 inklusive Outlook ueber das Office Deployment Tool.
+# Ist bereits eine Click-to-Run-Installation vorhanden, werden deren Produkt,
+# Sprache und Plattform uebernommen - ODT ergaenzt sie dann, statt eine zweite
+# danebenzustellen. Fehlt sie, wird mit Standardwerten frisch installiert.
+#
+# WICHTIG: --override ERSETZT die Installer-Argumente. Nur '/configure <xml>'
+# ist hier gueltig - ein 'Language=de-de' allein bewirkt nichts.
+function Install-Outlook {
+
+    if (Test-OutlookVorhanden) {
+        Write-Success "Outlook ist bereits installiert."
+        return
+    }
+
+    $produkt   = 'O365HomePremRetail'
+    $sprache   = 'de-de'
+    $plattform = '64'
+
     $c2rPfad = @(
         "HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration",
         "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Office\ClickToRun\Configuration"
     ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 
-    if (-not $c2rPfad) {
-        # Nachsehen, ob ueberhaupt irgendein Office vorhanden ist - das
-        # unterscheidet 'leere Maschine' von 'Office da, aber unlesbar'.
-        $officeSpuren = @(Get-ItemProperty @(
-                "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
-                "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
-            ) -ErrorAction SilentlyContinue |
-            Where-Object { $_.DisplayName -match 'Microsoft 365|Microsoft Office' } |
-            Select-Object -ExpandProperty DisplayName -Unique)
-
-        if ($officeSpuren.Count -gt 0) {
-            Write-ErrorMsg "Office ist installiert, aber die Click-to-Run-Konfiguration fehlt. Outlook kann nicht nachgetragen werden."
-            Write-Warn "Gefundene Office-Eintraege: $($officeSpuren -join ', ')"
-            Add-Diagnose "Kein ClickToRun\Configuration-Key, aber Office vorhanden: $($officeSpuren -join ' | ')"
-            Add-Hinweis "Outlook: Office-Installation pruefen (evtl. MSI-Version statt Click-to-Run)."
-        } else {
-            Write-ErrorMsg "Auf diesem Geraet ist kein Office installiert. Outlook laesst sich nur in eine vorhandene Microsoft-365-Installation nachtragen."
-            Write-Info "Auf einer frischen VM ohne Office ist das das erwartete Verhalten."
-            Add-Diagnose "Weder ClickToRun-Key noch Office-Eintraege gefunden - Geraet ohne Office."
-            Add-Hinweis "Outlook: erst Office ueber das Kundenkonto installieren, dann dieses Skript nochmal mit Punkt 10 starten."
+    if ($c2rPfad) {
+        $cfg = Get-ItemProperty -Path $c2rPfad -ErrorAction SilentlyContinue
+        if ($cfg.ProductReleaseIds) {
+            $vorhanden = @($cfg.ProductReleaseIds -split ',' |
+                           ForEach-Object { $_.Trim() } |
+                           Where-Object { $_ -and $_ -notmatch 'Visio|Project' }) | Select-Object -First 1
+            if ($vorhanden) { $produkt = $vorhanden }
         }
-        return
+        if ($cfg.ClientCulture) { $sprache = $cfg.ClientCulture }
+        if ($cfg.Platform -eq 'x86') { $plattform = '32' }
+        Write-Info "Vorhandene Office-Installation erkannt: $produkt / $sprache / ${plattform}-Bit"
+    } else {
+        Write-Info "Keine Click-to-Run-Installation gefunden - Neuinstallation mit $produkt / $sprache / ${plattform}-Bit"
     }
 
-    $cfg = Get-ItemProperty -Path $c2rPfad -ErrorAction SilentlyContinue
-
-    # Bei mehreren Produkten (z.B. plus Visio/Project) das Hauptprodukt nehmen.
-    $produkt = $null
-    if ($cfg.ProductReleaseIds) {
-        $produkt = @($cfg.ProductReleaseIds -split ',' |
-                     ForEach-Object { $_.Trim() } |
-                     Where-Object { $_ -and $_ -notmatch 'Visio|Project' }) | Select-Object -First 1
-    }
-    if (-not $produkt) {
-        Write-ErrorMsg "Office-Produkt-ID konnte nicht aus der Registry gelesen werden."
-        Add-Diagnose "ClickToRun\Configuration: ProductReleaseIds ist leer oder unlesbar."
-        Add-Hinweis "Outlook manuell nachinstallieren."
-        return
-    }
-
-    $sprache   = if ($cfg.ClientCulture) { $cfg.ClientCulture } else { "de-de" }
-    $plattform = if ($cfg.Platform -eq "x86") { "32" } else { "64" }
-
-    Write-Info "Gefunden: Produkt=$produkt, Sprache=$sprache, Plattform=${plattform}-Bit"
-    Add-Diagnose "Office C2R: ProductReleaseIds='$($cfg.ProductReleaseIds)' ClientCulture='$($cfg.ClientCulture)' Platform='$($cfg.Platform)'"
-
-    # Bewusst OHNE ExcludeApp: ein ExcludeApp wuerde die bereits vorhandenen
-    # Programme (Word/Excel/PowerPoint) aus der Installation ENTFERNEN.
-    # Ohne Ausschluesse wird nur ergaenzt, was noch fehlt - also Outlook.
+    # Bewusst OHNE ExcludeApp: ein Ausschluss wuerde bereits vorhandene
+    # Programme wie Word oder Excel aus der Installation ENTFERNEN.
     $officeXml = @"
 <Configuration>
   <Add OfficeClientEdition="$plattform">
@@ -844,7 +840,7 @@ function Install-Outlook {
 "@
 
     # Pfad OHNE Leerzeichen - erspart Anfuehrungszeichen-Aerger beim --override.
-    $xmlPfad = Join-Path $env:SystemRoot "Temp\autoeinrichtung_outlook.xml"
+    $xmlPfad = Join-Path $env:SystemRoot "Temp\autoeinrichtung_office.xml"
     try {
         Set-Content -Path $xmlPfad -Value $officeXml -Encoding UTF8 -Force -ErrorAction Stop
     } catch {
@@ -854,7 +850,7 @@ function Install-Outlook {
 
     $null = Wait-InstallerFrei -MaxSekunden 900
 
-    Write-Info "Office Deployment Tool laeuft - das kann einige Minuten dauern (Download)."
+    Write-Info "Office Deployment Tool laeuft - das dauert einige Minuten (Download)."
     try {
         $ausgabe = & winget.exe install --id Microsoft.Office -e --source winget `
                       --accept-package-agreements --accept-source-agreements `
@@ -867,15 +863,15 @@ function Install-Outlook {
 
     Remove-Item -Path $xmlPfad -Force -ErrorAction SilentlyContinue
 
-    if ($code -eq 0) {
-        Write-Success "Outlook wurde nachinstalliert (Sprache: $sprache)."
+    # Entscheidend ist nicht der Exitcode, sondern ob Outlook danach da ist.
+    if (Test-OutlookVorhanden) {
+        Write-Success "Outlook ist installiert (Sprache: $sprache)."
         Add-Hinweis "Outlook: beim ersten Start meldet sich der Kunde mit seinem Microsoft-Konto an."
     } else {
-        Write-ErrorMsg "Outlook-Nachinstallation fehlgeschlagen (Exitcode $code)."
+        Write-ErrorMsg "Outlook wurde NICHT installiert (winget Exitcode $code)."
         $letzteZeilen = @($ausgabe | Where-Object { $_ -and "$_".Trim() } | Select-Object -Last 5)
         if ($letzteZeilen.Count -gt 0) { Write-Warn "    Ausgabe: $(($letzteZeilen -join ' | ').Trim())" }
-        Add-Hinweis "Outlook manuell nachinstallieren (Office-Konto -> Apps verwalten)."
-        Add-Diagnose "Outlook-Installation Exitcode $code bei Produkt '$produkt', Sprache '$sprache', Plattform '$plattform'."
+        Add-Hinweis "Outlook manuell nachinstallieren."
     }
 }
 
