@@ -574,6 +574,25 @@ if ($systemSetup) {
 
     foreach ($junk in $bloatwareList) {
 
+        # --- Provisionierte Apps ZUERST (fuer kuenftige Benutzerkonten) ---
+        # Reihenfolge ist wichtig: sind die Paketdateien durch Remove-AppxPackage
+        # schon weg, scheitert das Entfernen aus dem Image mit 'Datei nicht gefunden'.
+        foreach ($prov in ($provisioned | Where-Object { $_.DisplayName -like "*$junk*" })) {
+            try {
+                Remove-AppxProvisionedPackage -Online -PackageName $prov.PackageName -ErrorAction Stop | Out-Null
+                Write-Success "$($prov.DisplayName) aus dem Windows-Image entfernt (kommt bei neuen Konten nicht wieder)."
+            } catch {
+                # 0x80070002 / 0x80070003: Datei bzw. Pfad nicht gefunden. Dann ist
+                # im Image ohnehin nichts mehr da - das ist kein Fehlschlag.
+                $hResult = $_.Exception.HResult
+                if ($hResult -eq -2147024894 -or $hResult -eq -2147024893) {
+                    Write-Info "$($prov.DisplayName) war im Windows-Image bereits nicht mehr vorhanden."
+                } else {
+                    Write-ErrorMsg "$($prov.DisplayName) konnte nicht aus dem Image entfernt werden: $($_.Exception.Message)"
+                }
+            }
+        }
+
         # --- Store-Apps (aktuelle + alle vorhandenen Profile) ---
         $appxPakete = @(Get-AppxPackage -AllUsers -Name "*$junk*" -ErrorAction SilentlyContinue)
         foreach ($paket in $appxPakete) {
@@ -582,16 +601,6 @@ if ($systemSetup) {
                 Write-Success "$($paket.Name) (Windows App) entfernt."
             } catch {
                 Write-ErrorMsg "$($paket.Name) (Windows App) konnte nicht entfernt werden: $($_.Exception.Message)"
-            }
-        }
-
-        # --- Provisionierte Apps (fuer kuenftige Benutzerkonten) ---
-        foreach ($prov in ($provisioned | Where-Object { $_.DisplayName -like "*$junk*" })) {
-            try {
-                Remove-AppxProvisionedPackage -Online -PackageName $prov.PackageName -ErrorAction Stop | Out-Null
-                Write-Success "$($prov.DisplayName) aus dem Windows-Image entfernt (kommt bei neuen Konten nicht wieder)."
-            } catch {
-                Write-ErrorMsg "$($prov.DisplayName) konnte nicht aus dem Image entfernt werden: $($_.Exception.Message)"
             }
         }
 
