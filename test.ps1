@@ -1015,10 +1015,18 @@ if ($selectedApps.Count -gt 0) {
             # Update-Paket bricht mit 'ARM64 architecture detected - patch will
             # be blocked' ab, danach macht MSI alles rueckgaengig (Fehler 1603).
             # Drei Fehlversuche bringen daran nichts.
-            Write-Warn "$($app.Name) laesst sich auf ARM-Geraeten nicht ueber winget installieren - uebersprungen."
+            Write-Warn "$($app.Name) laesst sich auf ARM-Geraeten nicht installieren."
             Write-Info "    Adobe bietet keine ARM-Fassung; das Update-Paket im winget-Paket blockiert die Architektur."
-            Write-Info "    Alternative: Sumatra PDF (Menuepunkt 8) oder Adobes eigener Online-Installer."
-            Add-Hinweis "$($app.Name): auf ARM-Geraet uebersprungen - von Hand mit Adobes Online-Installer nachziehen oder Sumatra PDF nehmen."
+
+            # Sumatra PDF hat seit 3.5.2 einen eigenen ARM64-Build und laeuft
+            # dort nativ - damit hat der Kunde trotzdem einen PDF-Betrachter.
+            if ($selectedApps -contains '8') {
+                Write-Info "    Sumatra PDF ist ohnehin ausgewaehlt und wird als PDF-Betrachter installiert."
+            } else {
+                Write-Info "    Stattdessen wird Sumatra PDF installiert - das laeuft nativ auf ARM."
+                Install-WingetApp -Id $wingetApps['8'].Id -Name $wingetApps['8'].Name
+            }
+            Add-Hinweis "$($app.Name): auf ARM-Geraet nicht moeglich - Sumatra PDF wurde stattdessen eingerichtet."
         } else {
             $modus = if ($app.Modus) { $app.Modus } else { 'Still' }
             Install-WingetApp -Id $app.Id -Name $app.Name -Modus $modus
