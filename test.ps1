@@ -732,25 +732,51 @@ function Install-Outlook {
 
     $null = Wait-InstallerFrei -MaxSekunden 900
 
+    # Setup direkt von Microsoft holen statt ueber das winget-Paket.
+    # Microsoft aktualisiert diese setup.exe oefter als das winget-Manifest
+    # gepflegt wird, dadurch scheitert 'winget install Microsoft.Office'
+    # regelmaessig mit 0x8A150011 (Hash stimmt nicht). Dieselbe Datei,
+    # dieselbe Quelle, nur ohne das veraltete Manifest dazwischen.
+    $setupPfad = Join-Path $env:SystemRoot "Temp\autoeinrichtung_officesetup.exe"
+    $ausgabe   = @()
+    $code      = $null
+
+    Write-Info "Lade Office-Setup von Microsoft..."
+    try {
+        Invoke-WebRequest -Uri "https://officecdn.microsoft.com/pr/wsus/setup.exe" `
+                          -OutFile $setupPfad -UseBasicParsing -ErrorAction Stop
+    } catch {
+        Write-Warn "Download fehlgeschlagen ($($_.Exception.Message)) - versuche es ueber winget."
+        $setupPfad = $null
+    }
+
     Write-Info "Office Deployment Tool laeuft - das dauert einige Minuten (Download)."
     try {
-        $ausgabe = & winget.exe install --id Microsoft.Office -e --source winget `
-                      --accept-package-agreements --accept-source-agreements `
-                      --override "/configure $xmlPfad" 2>&1
-        $code = $LASTEXITCODE
+        if ($setupPfad) {
+            $prozess = Start-Process -FilePath $setupPfad -ArgumentList '/configure', $xmlPfad `
+                          -WindowStyle Hidden -PassThru -Wait -ErrorAction Stop
+            $code = $prozess.ExitCode
+        } else {
+            $ausgabe = & winget.exe install --id Microsoft.Office -e --source winget `
+                          --accept-package-agreements --accept-source-agreements `
+                          --override "/configure $xmlPfad" 2>&1
+            $code = $LASTEXITCODE
+        }
     } catch {
-        Write-ErrorMsg "Outlook: winget konnte nicht gestartet werden: $($_.Exception.Message)"
+        Write-ErrorMsg "Outlook: Installation konnte nicht gestartet werden: $($_.Exception.Message)"
+        Remove-Item -Path $xmlPfad -Force -ErrorAction SilentlyContinue
         return
     }
 
     Remove-Item -Path $xmlPfad -Force -ErrorAction SilentlyContinue
+    if ($setupPfad) { Remove-Item -Path $setupPfad -Force -ErrorAction SilentlyContinue }
 
     # Entscheidend ist nicht der Exitcode, sondern ob Outlook danach da ist.
     if (Test-OutlookVorhanden) {
         Write-Success "Outlook ist installiert (Sprache: $sprache)."
         Add-Hinweis "Outlook: beim ersten Start meldet sich der Kunde mit seinem Microsoft-Konto an."
     } else {
-        Write-ErrorMsg "Outlook wurde NICHT installiert (winget Exitcode $code)."
+        Write-ErrorMsg "Outlook wurde NICHT installiert (Exitcode $code)."
         $letzteZeilen = @($ausgabe | Where-Object { $_ -and "$_".Trim() } | Select-Object -Last 5)
         if ($letzteZeilen.Count -gt 0) { Write-Warn "    Ausgabe: $(($letzteZeilen -join ' | ').Trim())" }
         Add-Hinweis "Outlook manuell nachinstallieren."
