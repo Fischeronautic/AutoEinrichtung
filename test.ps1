@@ -322,13 +322,15 @@ if (-not $wingetVerfuegbar) {
 
 # Schrittliste passend zum gewaehlten Modus - der Zaehler stimmt dadurch
 # auch, wenn nur Apps oder nur die Systemeinrichtung laeuft.
+# Bloatware bewusst zuletzt: ein McAfee-Deinstallationsfenster wuerde sonst
+# per MSI-Sperre den Download der Apps aufhalten.
 $ablauf = @()
 if ($systemSetup)              { $ablauf += 'Zeit und BitLocker' }
 if ($systemSetup)              { $ablauf += 'Windows-Anpassungen' }
-if ($systemSetup)              { $ablauf += 'Bloatware-Bereinigung' }
 if ($selectedApps.Count -gt 0) { $ablauf += 'App-Installation' }
 if ($systemSetup)              { $ablauf += 'Taskleiste' }
 if ($systemSetup)              { $ablauf += 'BitLocker-Abschluss' }
+if ($systemSetup)              { $ablauf += 'Bloatware-Bereinigung' }
 Set-Ablauf $ablauf
 
 Write-Host ""
@@ -551,127 +553,7 @@ if ($systemSetup) {
 }
 
 # ==========================================
-# 5. Bloatware-Bereinigung (Muellschlucker)
-# ==========================================
-if ($systemSetup) {
-    Write-Schritt "Bloatware-Bereinigung"
-    Write-Info "Starte Bloatware-Bereinigung (Suche nach Junk-Apps)..."
-    $bloatwareList = @("McAfee", "WebAdvisor", "Norton", "ExpressVPN", "Dropbox", "TikTok", "Instagram", "Facebook", "Spotify", "WhatsApp")
-
-    $uninstallPaths = @(
-        "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
-        "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
-        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"
-    )
-
-    # Provisioned Packages einmal holen - sonst kommt der Muell beim naechsten neuen Profil zurueck.
-    $provisioned = @()
-    try {
-        $provisioned = @(Get-AppxProvisionedPackage -Online -ErrorAction Stop)
-    } catch {
-        Write-Warn "Provisionierte Apps konnten nicht gelesen werden: $($_.Exception.Message)"
-    }
-
-    foreach ($junk in $bloatwareList) {
-
-        # --- Provisionierte Apps ZUERST (fuer kuenftige Benutzerkonten) ---
-        # Reihenfolge ist wichtig: sind die Paketdateien durch Remove-AppxPackage
-        # schon weg, scheitert das Entfernen aus dem Image mit 'Datei nicht gefunden'.
-        foreach ($prov in ($provisioned | Where-Object { $_.DisplayName -like "*$junk*" })) {
-            try {
-                Remove-AppxProvisionedPackage -Online -PackageName $prov.PackageName -ErrorAction Stop | Out-Null
-                Write-Success "$($prov.DisplayName) aus dem Windows-Image entfernt (kommt bei neuen Konten nicht wieder)."
-            } catch {
-                # 0x80070002 / 0x80070003: Datei bzw. Pfad nicht gefunden. Dann ist
-                # im Image ohnehin nichts mehr da - das ist kein Fehlschlag.
-                $hResult = $_.Exception.HResult
-                if ($hResult -eq -2147024894 -or $hResult -eq -2147024893) {
-                    Write-Info "$($prov.DisplayName) war im Windows-Image bereits nicht mehr vorhanden."
-                } else {
-                    Write-ErrorMsg "$($prov.DisplayName) konnte nicht aus dem Image entfernt werden: $($_.Exception.Message)"
-                }
-            }
-        }
-
-        # --- Store-Apps (aktuelle + alle vorhandenen Profile) ---
-        $appxPakete = @(Get-AppxPackage -AllUsers -Name "*$junk*" -ErrorAction SilentlyContinue)
-        foreach ($paket in $appxPakete) {
-            try {
-                Remove-AppxPackage -Package $paket.PackageFullName -AllUsers -ErrorAction Stop
-                Write-Success "$($paket.Name) (Windows App) entfernt."
-            } catch {
-                Write-ErrorMsg "$($paket.Name) (Windows App) konnte nicht entfernt werden: $($_.Exception.Message)"
-            }
-        }
-
-        # --- Klassische Desktop-Programme ---
-        $desktopApps = @(Get-ItemProperty $uninstallPaths -ErrorAction SilentlyContinue |
-                         Where-Object { $_.DisplayName -and $_.DisplayName -like "*$junk*" })
-
-        foreach ($app in $desktopApps) {
-
-            # DIAGNOSE: exakte Uninstall-Daten protokollieren. Damit laesst sich
-            # spaeter der wirklich stille Befehl fest einbauen, statt zu raten.
-            Add-Diagnose ("Name='{0}' | Version='{1}' | Publisher='{2}'" -f $app.DisplayName, $app.DisplayVersion, $app.Publisher)
-            Add-Diagnose ("    UninstallString      = {0}" -f $(if ($app.UninstallString) { $app.UninstallString } else { '<leer>' }))
-            Add-Diagnose ("    QuietUninstallString = {0}" -f $(if ($app.QuietUninstallString) { $app.QuietUninstallString } else { '<leer>' }))
-
-            # Nur STILLE Deinstallationen synchron fahren. Ein blindes
-            # cmd /c "<UninstallString>" oeffnet sonst GUI-Fenster und blockiert das Skript.
-            $stillerBefehl = $null
-
-            if ($app.QuietUninstallString) {
-                $stillerBefehl = $app.QuietUninstallString
-            }
-            elseif ($app.UninstallString -and $app.UninstallString -match '(\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\})') {
-                # MSI-Paket: laesst sich zuverlaessig still deinstallieren
-                $stillerBefehl = "msiexec.exe /x $($Matches[1]) /qn /norestart"
-            }
-
-            if ($stillerBefehl) {
-                Write-Info "Deinstalliere still: $($app.DisplayName)"
-                try {
-                    # Ganzen Befehl in EIN Argument packen und zusaetzlich klammern:
-                    # cmd /c "<befehl>" ist die einzige Form, die auch bei Pfaden
-                    # mit Leerzeichen und eigenen Anfuehrungszeichen sauber laeuft.
-                    $prozess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$stillerBefehl`"" -WindowStyle Hidden -PassThru -ErrorAction Stop
-                    $null = $prozess | Wait-Process -Timeout 600 -ErrorAction SilentlyContinue
-                    if (-not $prozess.HasExited) {
-                        Stop-Process -Id $prozess.Id -Force -ErrorAction SilentlyContinue
-                        Write-ErrorMsg "$($app.DisplayName): Deinstallation nach 10 Minuten abgebrochen (Timeout)."
-                        Add-Hinweis "$($app.DisplayName) manuell deinstallieren (Timeout)."
-                    } elseif ($prozess.ExitCode -eq 0 -or $prozess.ExitCode -eq 3010) {
-                        Write-Success "$($app.DisplayName) deinstalliert."
-                        if ($prozess.ExitCode -eq 3010) { Add-Hinweis "$($app.DisplayName): Neustart erforderlich." }
-                    } else {
-                        Write-ErrorMsg "$($app.DisplayName): Deinstallation fehlgeschlagen (Exitcode $($prozess.ExitCode))."
-                        Add-Hinweis "$($app.DisplayName) manuell deinstallieren."
-                    }
-                } catch {
-                    Write-ErrorMsg "$($app.DisplayName): Deinstallation konnte nicht gestartet werden: $($_.Exception.Message)"
-                    Add-Hinweis "$($app.DisplayName) manuell deinstallieren."
-                }
-            }
-            elseif ($app.UninstallString) {
-                # Kein stiller Weg (typisch McAfee/Norton): Fenster im HINTERGRUND oeffnen
-                # und weiterarbeiten. Der Techniker klickt es nebenbei durch.
-                Write-Warn "$($app.DisplayName): keine stille Deinstallation moeglich - Fenster wird geoeffnet, Skript laeuft weiter."
-                try {
-                    $prozess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$($app.UninstallString)`"" -PassThru -ErrorAction Stop
-                    $script:AsyncJobs.Add([pscustomobject]@{ Name = $app.DisplayName; Prozess = $prozess })
-                    Add-Hinweis "$($app.DisplayName): Deinstallationsfenster wurde geoeffnet - bitte durchklicken."
-                } catch {
-                    Write-ErrorMsg "$($app.DisplayName): Deinstallation konnte nicht gestartet werden: $($_.Exception.Message)"
-                    Add-Hinweis "$($app.DisplayName) manuell deinstallieren."
-                }
-            }
-        }
-    }
-    Write-Success "Bloatware-Pruefung abgeschlossen (offene Fenster laufen im Hintergrund weiter)."
-}
-
-# ==========================================
-# 6. App-Installation (Winget)
+# 5. App-Installation (Winget)
 # ==========================================
 
 # Prueft nach der Installation, ob das Paket wirklich da ist.
@@ -879,25 +761,6 @@ if ($selectedApps.Count -gt 0) {
     Write-Schritt "App-Installation"
     Write-Info "Wird installiert: $((($selectedApps | ForEach-Object { $wingetApps[$_].Name })) -join ', ')"
 
-    # Offene GUI-Deinstallationen (McAfee & Co.) zuerst abwarten - sonst
-    # blockieren sie die App-Installation mit MSI-Exitcode 1618.
-    if ($script:AsyncJobs.Count -gt 0) {
-        $offene = @($script:AsyncJobs | Where-Object { -not $_.Prozess.HasExited })
-        if ($offene.Count -gt 0) {
-            Write-Warn "Es laufen noch Deinstallations-Fenster: $(($offene.Name) -join ', ')"
-            Write-Warn "Bitte diese jetzt fertig durchklicken - danach geht es automatisch weiter."
-            foreach ($job in $offene) {
-                $null = $job.Prozess | Wait-Process -Timeout 900 -ErrorAction SilentlyContinue
-                if ($job.Prozess.HasExited) {
-                    Write-Success "$($job.Name): Deinstallationsfenster geschlossen."
-                } else {
-                    Write-Warn "$($job.Name): Fenster nach 15 Minuten noch offen - es wird trotzdem weitergemacht."
-                    Add-Hinweis "$($job.Name): Deinstallation pruefen."
-                }
-            }
-        }
-    }
-
     # Quellen aktualisieren - auf frisch aufgesetzten Geraeten ist der
     # winget-Index oft veraltet, was zu sporadischen Fehlschlaegen fuehrt.
     Write-Info "Aktualisiere winget-Paketquellen..."
@@ -924,7 +787,7 @@ if ($selectedApps.Count -gt 0) {
 }
 
 # ==========================================
-# 7. Taskleisten-Pins setzen (NUR EXPLORER)
+# 6. Taskleisten-Pins setzen
 # ==========================================
 # Windows 11 steuert Taskleisten-Pins ueber LayoutModification.XML
 # (CustomTaskbarLayoutCollection / TaskbarPinList) - NICHT ueber JSON.
@@ -1042,7 +905,7 @@ $($pinZeilen -join "`r`n")
 }
 
 # ==========================================
-# 8. Abschluss-Pruefung (BitLocker)
+# 7. Abschluss-Pruefung (BitLocker)
 # ==========================================
 if ($systemSetup) {
     Write-Schritt "BitLocker-Abschluss"
@@ -1085,10 +948,127 @@ if ($systemSetup) {
 }
 
 # ==========================================
-# 9. Zusammenfassung
+# 8. Bloatware-Bereinigung (Muellschlucker)
 # ==========================================
+if ($systemSetup) {
+    Write-Schritt "Bloatware-Bereinigung"
+    Write-Info "Starte Bloatware-Bereinigung (Suche nach Junk-Apps)..."
+    $bloatwareList = @("McAfee", "WebAdvisor", "Norton", "ExpressVPN", "Dropbox", "TikTok", "Instagram", "Facebook", "Spotify", "WhatsApp")
+
+    $uninstallPaths = @(
+        "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    )
+
+    # Provisioned Packages einmal holen - sonst kommt der Muell beim naechsten neuen Profil zurueck.
+    $provisioned = @()
+    try {
+        $provisioned = @(Get-AppxProvisionedPackage -Online -ErrorAction Stop)
+    } catch {
+        Write-Warn "Provisionierte Apps konnten nicht gelesen werden: $($_.Exception.Message)"
+    }
+
+    foreach ($junk in $bloatwareList) {
+
+        # --- Provisionierte Apps ZUERST (fuer kuenftige Benutzerkonten) ---
+        # Reihenfolge ist wichtig: sind die Paketdateien durch Remove-AppxPackage
+        # schon weg, scheitert das Entfernen aus dem Image mit 'Datei nicht gefunden'.
+        foreach ($prov in ($provisioned | Where-Object { $_.DisplayName -like "*$junk*" })) {
+            try {
+                Remove-AppxProvisionedPackage -Online -PackageName $prov.PackageName -ErrorAction Stop | Out-Null
+                Write-Success "$($prov.DisplayName) aus dem Windows-Image entfernt (kommt bei neuen Konten nicht wieder)."
+            } catch {
+                # 0x80070002 / 0x80070003: Datei bzw. Pfad nicht gefunden. Dann ist
+                # im Image ohnehin nichts mehr da - das ist kein Fehlschlag.
+                $hResult = $_.Exception.HResult
+                if ($hResult -eq -2147024894 -or $hResult -eq -2147024893) {
+                    Write-Info "$($prov.DisplayName) war im Windows-Image bereits nicht mehr vorhanden."
+                } else {
+                    Write-ErrorMsg "$($prov.DisplayName) konnte nicht aus dem Image entfernt werden: $($_.Exception.Message)"
+                }
+            }
+        }
+
+        # --- Store-Apps (aktuelle + alle vorhandenen Profile) ---
+        $appxPakete = @(Get-AppxPackage -AllUsers -Name "*$junk*" -ErrorAction SilentlyContinue)
+        foreach ($paket in $appxPakete) {
+            try {
+                Remove-AppxPackage -Package $paket.PackageFullName -AllUsers -ErrorAction Stop
+                Write-Success "$($paket.Name) (Windows App) entfernt."
+            } catch {
+                Write-ErrorMsg "$($paket.Name) (Windows App) konnte nicht entfernt werden: $($_.Exception.Message)"
+            }
+        }
+
+        # --- Klassische Desktop-Programme ---
+        $desktopApps = @(Get-ItemProperty $uninstallPaths -ErrorAction SilentlyContinue |
+                         Where-Object { $_.DisplayName -and $_.DisplayName -like "*$junk*" })
+
+        foreach ($app in $desktopApps) {
+
+            # DIAGNOSE: exakte Uninstall-Daten protokollieren. Damit laesst sich
+            # spaeter der wirklich stille Befehl fest einbauen, statt zu raten.
+            Add-Diagnose ("Name='{0}' | Version='{1}' | Publisher='{2}'" -f $app.DisplayName, $app.DisplayVersion, $app.Publisher)
+            Add-Diagnose ("    UninstallString      = {0}" -f $(if ($app.UninstallString) { $app.UninstallString } else { '<leer>' }))
+            Add-Diagnose ("    QuietUninstallString = {0}" -f $(if ($app.QuietUninstallString) { $app.QuietUninstallString } else { '<leer>' }))
+
+            # Nur STILLE Deinstallationen synchron fahren. Ein blindes
+            # cmd /c "<UninstallString>" oeffnet sonst GUI-Fenster und blockiert das Skript.
+            $stillerBefehl = $null
+
+            if ($app.QuietUninstallString) {
+                $stillerBefehl = $app.QuietUninstallString
+            }
+            elseif ($app.UninstallString -and $app.UninstallString -match '(\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\})') {
+                # MSI-Paket: laesst sich zuverlaessig still deinstallieren
+                $stillerBefehl = "msiexec.exe /x $($Matches[1]) /qn /norestart"
+            }
+
+            if ($stillerBefehl) {
+                Write-Info "Deinstalliere still: $($app.DisplayName)"
+                try {
+                    # Ganzen Befehl in EIN Argument packen und zusaetzlich klammern:
+                    # cmd /c "<befehl>" ist die einzige Form, die auch bei Pfaden
+                    # mit Leerzeichen und eigenen Anfuehrungszeichen sauber laeuft.
+                    $prozess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$stillerBefehl`"" -WindowStyle Hidden -PassThru -ErrorAction Stop
+                    $null = $prozess | Wait-Process -Timeout 600 -ErrorAction SilentlyContinue
+                    if (-not $prozess.HasExited) {
+                        Stop-Process -Id $prozess.Id -Force -ErrorAction SilentlyContinue
+                        Write-ErrorMsg "$($app.DisplayName): Deinstallation nach 10 Minuten abgebrochen (Timeout)."
+                        Add-Hinweis "$($app.DisplayName) manuell deinstallieren (Timeout)."
+                    } elseif ($prozess.ExitCode -eq 0 -or $prozess.ExitCode -eq 3010) {
+                        Write-Success "$($app.DisplayName) deinstalliert."
+                        if ($prozess.ExitCode -eq 3010) { Add-Hinweis "$($app.DisplayName): Neustart erforderlich." }
+                    } else {
+                        Write-ErrorMsg "$($app.DisplayName): Deinstallation fehlgeschlagen (Exitcode $($prozess.ExitCode))."
+                        Add-Hinweis "$($app.DisplayName) manuell deinstallieren."
+                    }
+                } catch {
+                    Write-ErrorMsg "$($app.DisplayName): Deinstallation konnte nicht gestartet werden: $($_.Exception.Message)"
+                    Add-Hinweis "$($app.DisplayName) manuell deinstallieren."
+                }
+            }
+            elseif ($app.UninstallString) {
+                # Kein stiller Weg (typisch McAfee/Norton): Fenster im HINTERGRUND oeffnen
+                # und weiterarbeiten. Der Techniker klickt es nebenbei durch.
+                Write-Warn "$($app.DisplayName): keine stille Deinstallation moeglich - Fenster wird geoeffnet, Skript laeuft weiter."
+                try {
+                    $prozess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$($app.UninstallString)`"" -PassThru -ErrorAction Stop
+                    $script:AsyncJobs.Add([pscustomobject]@{ Name = $app.DisplayName; Prozess = $prozess })
+                    Add-Hinweis "$($app.DisplayName): Deinstallationsfenster wurde geoeffnet - bitte durchklicken."
+                } catch {
+                    Write-ErrorMsg "$($app.DisplayName): Deinstallation konnte nicht gestartet werden: $($_.Exception.Message)"
+                    Add-Hinweis "$($app.DisplayName) manuell deinstallieren."
+                }
+            }
+        }
+    }
+    Write-Success "Bloatware-Pruefung abgeschlossen (offene Fenster laufen im Hintergrund weiter)."
+}
+
 # ==========================================
-# 8b. Windows-Standard-Apps (Browser / PDF)
+# 9. Windows-Standard-Apps (Browser / PDF)
 # ==========================================
 # Setzen laesst sich das nicht: seit dem UserChoice Protection Driver (UCPD)
 # sind die UserChoice-Schluessel fuer http, https und .pdf hash-geschuetzt.
@@ -1124,6 +1104,9 @@ if ($selectedApps.Count -gt 0) {
     }
 }
 
+# ==========================================
+# 10. Abschluss
+# ==========================================
 Stop-Fortschritt
 
 $abschlussFarbe = if ($script:Fehlerliste.Count -gt 0) { 'Yellow' } else { 'Green' }
