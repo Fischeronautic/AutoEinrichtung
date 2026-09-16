@@ -930,6 +930,17 @@ function Install-Outlook {
                 Add-Diagnose "Office-Ordner '$wurzel' existiert nicht."
             }
         }
+        # Die Ausschlussliste der vorhandenen Installation zeigen. Bei
+        # vorinstalliertem Microsoft 365 ist Outlook dort oft eingetragen,
+        # und genau das laesst /configure unangetastet.
+        if ($c2rPfad) {
+            $alleWerte = Get-ItemProperty -Path $c2rPfad -ErrorAction SilentlyContinue
+            foreach ($name in @($alleWerte.PSObject.Properties.Name |
+                                Where-Object { $_ -match '(?i)excluded|productrelease|clientculture|platform|updatechannel|versiontoreport' })) {
+                Add-Diagnose "C2R $name = $($alleWerte.$name)"
+            }
+        }
+
         # Protokoll des Setups direkt anzeigen - da steht der eigentliche Grund.
         $log = Get-ChildItem -Path $logOrdner -Filter '*.log' -Recurse -ErrorAction SilentlyContinue |
                Sort-Object LastWriteTime -Descending | Select-Object -First 1
