@@ -870,7 +870,7 @@ function Install-Outlook {
 "@
 
     # Pfade OHNE Leerzeichen - erspart Anfuehrungszeichen-Aerger.
-    $xmlPfad = Join-Path $env:SystemRoot "Temp\autoeinrichtung_office.xml"
+    $xmlPfad = Join-Path $logOrdner "configuration.xml"
     try {
         # ASCII statt UTF8: Windows PowerShell schreibt bei UTF8 eine
         # Bytefolgemarke an den Dateianfang. Der Inhalt ist reines ASCII,
@@ -888,7 +888,7 @@ function Install-Outlook {
     # gepflegt wird, dadurch scheitert 'winget install Microsoft.Office'
     # regelmaessig mit 0x8A150011 (Hash stimmt nicht). Dieselbe Datei,
     # dieselbe Quelle, nur ohne das veraltete Manifest dazwischen.
-    $setupPfad = Join-Path $env:SystemRoot "Temp\autoeinrichtung_officesetup.exe"
+    $setupPfad = Join-Path $logOrdner "setup.exe"
     $ausgabe   = @()
     $code      = $null
 
@@ -931,9 +931,21 @@ function Install-Outlook {
         if ($setupPfad) {
             # /configure ist der vorgesehene Schalter des Deployment Tools.
             # Was dabei passiert, steht im Protokollordner.
-            $prozess = Start-Process -FilePath $setupPfad -ArgumentList '/configure', $xmlPfad `
-                          -PassThru -Wait -ErrorAction Stop
+            # Arbeitsverzeichnis auf den Ordner setzen, in dem setup.exe und
+            # configuration.xml liegen. Aus C:\Windows\system32 heraus gestartet
+            # beendete sich das Setup wortlos mit 0 - so laeuft es auch von Hand.
+            $ausgabeDatei = Join-Path $logOrdner "setup_ausgabe.txt"
+            $fehlerDatei  = Join-Path $logOrdner "setup_fehler.txt"
+            $prozess = Start-Process -FilePath $setupPfad -ArgumentList '/configure', 'configuration.xml' `
+                          -WorkingDirectory $logOrdner -PassThru -Wait -ErrorAction Stop `
+                          -RedirectStandardOutput $ausgabeDatei -RedirectStandardError $fehlerDatei
             $code = $prozess.ExitCode
+            foreach ($datei in @($ausgabeDatei, $fehlerDatei)) {
+                if (Test-Path $datei) {
+                    $inhalt = @(Get-Content -Path $datei -ErrorAction SilentlyContinue | Where-Object { $_.Trim() })
+                    foreach ($zeile in ($inhalt | Select-Object -Last 5)) { Add-Diagnose "Setup sagt: $($zeile.Trim())" }
+                }
+            }
         } else {
             $ausgabe = & winget.exe install --id Microsoft.Office -e --source winget `
                           --accept-package-agreements --accept-source-agreements `
@@ -946,8 +958,6 @@ function Install-Outlook {
         return
     }
 
-    Remove-Item -Path $xmlPfad -Force -ErrorAction SilentlyContinue
-    if ($setupPfad) { Remove-Item -Path $setupPfad -Force -ErrorAction SilentlyContinue }
 
     # Entscheidend ist nicht der Exitcode, sondern ob Outlook danach da ist.
     if (Test-OutlookVorhanden) {
@@ -994,7 +1004,9 @@ function Install-Outlook {
             }
             foreach ($zeile in $zeilen) { Add-Diagnose "   $($zeile.Trim())" }
         } else {
-            Add-Diagnose "Kein Setup-Protokoll unter '$logOrdner' - das Setup hat gar nicht gestartet."
+            $inhalt = @(Get-ChildItem -Path $logOrdner -Recurse -File -ErrorAction SilentlyContinue |
+                        Select-Object -ExpandProperty Name)
+            Add-Diagnose "Kein Setup-Protokoll. Inhalt von '$logOrdner': $(if ($inhalt.Count) { $inhalt -join ', ' } else { 'leer' })"
         }
 
         Add-Hinweis "Outlook manuell nachinstallieren."
