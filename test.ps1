@@ -834,6 +834,11 @@ function Install-Outlook {
         Write-Info "Keine Click-to-Run-Installation gefunden - Neuinstallation mit $produkt / $sprache / ${plattform}-Bit"
     }
 
+    # Eigener Protokollordner - das Setup schreibt dort mit, was es tut.
+    $logOrdner = Join-Path $env:SystemRoot "Temp\AutoEinrichtungOffice"
+    Remove-Item -Path $logOrdner -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -Path $logOrdner -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+
     # Bewusst OHNE ExcludeApp: ein Ausschluss wuerde bereits vorhandene
     # Programme wie Word oder Excel aus der Installation ENTFERNEN.
     $officeXml = @"
@@ -845,13 +850,17 @@ function Install-Outlook {
   </Add>
   <Display Level="None" AcceptEULA="TRUE" />
   <Property Name="FORCEAPPSHUTDOWN" Value="TRUE" />
+  <Logging Level="Standard" Path="$logOrdner" />
 </Configuration>
 "@
 
-    # Pfad OHNE Leerzeichen - erspart Anfuehrungszeichen-Aerger beim --override.
+    # Pfade OHNE Leerzeichen - erspart Anfuehrungszeichen-Aerger.
     $xmlPfad = Join-Path $env:SystemRoot "Temp\autoeinrichtung_office.xml"
     try {
-        Set-Content -Path $xmlPfad -Value $officeXml -Encoding UTF8 -Force -ErrorAction Stop
+        # ASCII statt UTF8: Windows PowerShell schreibt bei UTF8 eine
+        # Bytefolgemarke an den Dateianfang. Der Inhalt ist reines ASCII,
+        # damit ist die Datei garantiert ohne Vorspann.
+        Set-Content -Path $xmlPfad -Value $officeXml -Encoding ASCII -Force -ErrorAction Stop
     } catch {
         Write-ErrorMsg "Office-Konfiguration konnte nicht geschrieben werden: $($_.Exception.Message)"
         return
@@ -880,10 +889,9 @@ function Install-Outlook {
     Write-Info "Office Deployment Tool laeuft - das dauert einige Minuten (Download)."
     try {
         if ($setupPfad) {
-            # Ohne /configure: mit der Konfigurationsdatei kam Exitcode 0 zurueck,
-            # ohne dass etwas installiert wurde. So aufgerufen hat das Setup in
-            # der Werkstatt bisher zuverlaessig Microsoft 365 aufgesetzt.
-            $prozess = Start-Process -FilePath $setupPfad -ArgumentList "Language=$sprache" `
+            # /configure ist der vorgesehene Schalter des Deployment Tools.
+            # Was dabei passiert, steht im Protokollordner.
+            $prozess = Start-Process -FilePath $setupPfad -ArgumentList '/configure', $xmlPfad `
                           -PassThru -Wait -ErrorAction Stop
             $code = $prozess.ExitCode
         } else {
@@ -922,10 +930,21 @@ function Install-Outlook {
                 Add-Diagnose "Office-Ordner '$wurzel' existiert nicht."
             }
         }
-        $log = Get-ChildItem -Path $env:TEMP -Filter '*.log' -ErrorAction SilentlyContinue |
-               Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-30) -and $_.Name -match '(?i)setup|office|odt' } |
-               Sort-Object LastWriteTime -Descending | Select-Object -First 3
-        if ($log) { Add-Diagnose "Office-Protokolle: $(($log.FullName) -join ' | ')" }
+        # Protokoll des Setups direkt anzeigen - da steht der eigentliche Grund.
+        $log = Get-ChildItem -Path $logOrdner -Filter '*.log' -Recurse -ErrorAction SilentlyContinue |
+               Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($log) {
+            Add-Diagnose "Setup-Protokoll: $($log.FullName)"
+            $zeilen = @(Get-Content -Path $log.FullName -ErrorAction SilentlyContinue |
+                        Where-Object { $_ -match '(?i)error|fail|abort|denied|invalid|not found' } |
+                        Select-Object -Last 8)
+            if ($zeilen.Count -eq 0) {
+                $zeilen = @(Get-Content -Path $log.FullName -ErrorAction SilentlyContinue | Select-Object -Last 8)
+            }
+            foreach ($zeile in $zeilen) { Add-Diagnose "   $($zeile.Trim())" }
+        } else {
+            Add-Diagnose "Kein Setup-Protokoll unter '$logOrdner' - das Setup hat gar nicht gestartet."
+        }
 
         Add-Hinweis "Outlook manuell nachinstallieren."
     }
@@ -1152,7 +1171,7 @@ if ($systemSetup) {
 # SetUserFTA funktionieren deshalb ebenfalls nicht mehr. UCPD abzuschalten
 # kommt nicht in Frage, der Treiber verhindert genau dieses Kapern.
 # Also: Einstellungsseite oeffnen, damit es zwei Klicks statt Sucherei sind.
-if ($selectedApps.Count -gt 0) {
+if ($systemSetup -and $selectedApps.Count -gt 0) {
 
     $standardRelevant = @{
         '2' = 'Google Chrome (Standardbrowser)'
