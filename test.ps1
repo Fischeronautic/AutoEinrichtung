@@ -197,7 +197,7 @@ if (-not $wingetVerfuegbar) {
 $wingetApps = [ordered]@{
     '1'  = @{ Name = "7-Zip";                                     Id = "7zip.7zip" }
     '2'  = @{ Name = "Google Chrome";                              Id = "Google.Chrome" }
-    '3'  = @{ Name = "Adobe Acrobat Reader";                       Id = "Adobe.Acrobat.Reader.64-bit"; Modus = "Standard"; Custom = "Adobe" }
+    '3'  = @{ Name = "Adobe Acrobat Reader";                       Id = "Adobe.Acrobat.Reader.32-bit"; Modus = "Standard" }
     '4'  = @{ Name = "Mozilla Firefox (Deutsch)";                  Id = "Mozilla.Firefox.de" }
     '5'  = @{ Name = "LibreOffice";                                Id = "TheDocumentFoundation.LibreOffice" }
     '6'  = @{ Name = "Thunderbird (Deutsch)";                      Id = "Mozilla.Thunderbird.de" }
@@ -880,8 +880,11 @@ function Install-Outlook {
     Write-Info "Office Deployment Tool laeuft - das dauert einige Minuten (Download)."
     try {
         if ($setupPfad) {
-            $prozess = Start-Process -FilePath $setupPfad -ArgumentList '/configure', $xmlPfad `
-                          -WindowStyle Hidden -PassThru -Wait -ErrorAction Stop
+            # Ohne /configure: mit der Konfigurationsdatei kam Exitcode 0 zurueck,
+            # ohne dass etwas installiert wurde. So aufgerufen hat das Setup in
+            # der Werkstatt bisher zuverlaessig Microsoft 365 aufgesetzt.
+            $prozess = Start-Process -FilePath $setupPfad -ArgumentList "Language=$sprache" `
+                          -PassThru -Wait -ErrorAction Stop
             $code = $prozess.ExitCode
         } else {
             $ausgabe = & winget.exe install --id Microsoft.Office -e --source winget `
@@ -928,30 +931,6 @@ function Install-Outlook {
     }
 }
 
-# Ein bereits vorhandener Acrobat Reader - auf Werksgeraeten oft die
-# 64-Bit-Fassung - laesst eine Installation der anderen Variante mit
-# MSI-Fehler 1603 scheitern. Deshalb vorher nachsehen, statt dagegen
-# anzurennen: ist schon einer da, bleibt er einfach drauf.
-function Install-Adobe {
-    param([string]$Id, [string]$Name)
-
-    $uninstallPfade = @(
-        "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
-        "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
-        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"
-    )
-    $vorhanden = @(Get-ItemProperty $uninstallPfade -ErrorAction SilentlyContinue |
-                   Where-Object { $_.DisplayName -and $_.DisplayName -match '(?i)acrobat' })
-
-    if ($vorhanden.Count -gt 0) {
-        Write-Success "$Name ist bereits vorhanden: $(($vorhanden.DisplayName | Select-Object -Unique) -join ', ')"
-        Write-Info "Wird nicht ueberinstalliert - eine zweite Variante wuerde mit Fehler 1603 abbrechen."
-        return
-    }
-
-    Install-WingetApp -Id $Id -Name $Name -Modus 'Standard'
-}
-
 if ($selectedApps.Count -gt 0) {
     Write-Schritt "App-Installation"
     Write-Info "Wird installiert: $((($selectedApps | ForEach-Object { $wingetApps[$_].Name })) -join ', ')"
@@ -991,8 +970,6 @@ if ($selectedApps.Count -gt 0) {
         $app = $wingetApps[$nummer]
         if ($app.Custom -eq "Outlook") {
             Install-Outlook
-        } elseif ($app.Custom -eq "Adobe") {
-            Install-Adobe -Id $app.Id -Name $app.Name
         } else {
             $modus = if ($app.Modus) { $app.Modus } else { 'Still' }
             Install-WingetApp -Id $app.Id -Name $app.Name -Modus $modus
