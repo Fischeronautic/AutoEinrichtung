@@ -156,6 +156,16 @@ if (-not $isAdmin) {
 Write-Banner "Windows 11 Ersteinrichtung" "Basis-Einstellungen, Bloatware und Apps"
 Write-Success "Administratorrechte erfolgreich bestaetigt."
 
+# Architektur feststellen. Auf ARM-Geraeten verhalten sich mehrere Installer
+# anders - das gleich zu wissen erspart Fehlersuche.
+$script:Architektur = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+$script:IstArm64    = ($script:Architektur -eq 'ARM64')
+if ($script:IstArm64) {
+    Write-Warn "Prozessorarchitektur: $($script:Architektur) - einzelne Programme verweigern auf ARM die Installation."
+} else {
+    Write-Info "Prozessorarchitektur: $($script:Architektur)"
+}
+
 # Internet-Pruefung: erst HTTP (ICMP wird in vielen Netzen geblockt), dann Ping als Fallback.
 function Test-Internetverbindung {
     try {
@@ -1000,6 +1010,15 @@ if ($selectedApps.Count -gt 0) {
         $app = $wingetApps[$nummer]
         if ($app.Custom -eq "Outlook") {
             Install-Outlook
+        } elseif ($script:IstArm64 -and $app.Id -like 'Adobe.Acrobat.Reader*') {
+            # Belegt durch das Installationsprotokoll: das mitgelieferte
+            # Update-Paket bricht mit 'ARM64 architecture detected - patch will
+            # be blocked' ab, danach macht MSI alles rueckgaengig (Fehler 1603).
+            # Drei Fehlversuche bringen daran nichts.
+            Write-Warn "$($app.Name) laesst sich auf ARM-Geraeten nicht ueber winget installieren - uebersprungen."
+            Write-Info "    Adobe bietet keine ARM-Fassung; das Update-Paket im winget-Paket blockiert die Architektur."
+            Write-Info "    Alternative: Sumatra PDF (Menuepunkt 8) oder Adobes eigener Online-Installer."
+            Add-Hinweis "$($app.Name): auf ARM-Geraet uebersprungen - von Hand mit Adobes Online-Installer nachziehen oder Sumatra PDF nehmen."
         } else {
             $modus = if ($app.Modus) { $app.Modus } else { 'Still' }
             Install-WingetApp -Id $app.Id -Name $app.Name -Modus $modus
