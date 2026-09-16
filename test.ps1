@@ -832,9 +832,14 @@ function Install-Outlook {
     if ($c2rPfad) {
         $cfg = Get-ItemProperty -Path $c2rPfad -ErrorAction SilentlyContinue
         if ($cfg.ProductReleaseIds) {
-            $vorhanden = @($cfg.ProductReleaseIds -split ',' |
-                           ForEach-Object { $_.Trim() } |
-                           Where-Object { $_ -and $_ -notmatch 'Visio|Project' }) | Select-Object -First 1
+            # OneNote, Visio und Project sind Beiprodukte - gesucht ist das
+            # eigentliche Office. Auf Werksgeraeten steht z.B.
+            # 'OneNoteFreeRetail,O365HomePremRetail' im Schluessel.
+            $kandidaten = @($cfg.ProductReleaseIds -split ',' |
+                            ForEach-Object { $_.Trim() } |
+                            Where-Object { $_ -and $_ -notmatch '(?i)visio|project|onenote' })
+            $vorhanden = $kandidaten | Where-Object { $_ -match '(?i)o365|office|microsoft365' } | Select-Object -First 1
+            if (-not $vorhanden) { $vorhanden = $kandidaten | Select-Object -First 1 }
             if ($vorhanden) { $produkt = $vorhanden }
         }
         if ($cfg.ClientCulture) { $sprache = $cfg.ClientCulture }
@@ -894,6 +899,31 @@ function Install-Outlook {
     } catch {
         Write-Warn "Download fehlgeschlagen ($($_.Exception.Message)) - versuche es ueber winget."
         $setupPfad = $null
+    }
+
+    # Datei pruefen, bevor sie gestartet wird. Eine leere oder falsche Datei
+    # startet klaglos und tut nichts - genau das war bisher nicht erkennbar.
+    if ($setupPfad) {
+        $datei = Get-Item -Path $setupPfad -ErrorAction SilentlyContinue
+        if (-not $datei) {
+            Write-Warn "Heruntergeladene Datei nicht auffindbar - versuche es ueber winget."
+            $setupPfad = $null
+        } else {
+            $kopf = ''
+            try {
+                $rohbytes = [System.IO.File]::ReadAllBytes($setupPfad)[0..1]
+                $kopf = -join ($rohbytes | ForEach-Object { [char]$_ })
+            } catch { }
+
+            Add-Diagnose "Office-Setup geladen: $([math]::Round($datei.Length / 1MB, 2)) MB, Dateikopf '$kopf'"
+
+            if ($datei.Length -lt 500KB -or $kopf -ne 'MZ') {
+                Write-ErrorMsg "Die heruntergeladene Datei ist kein lauffaehiges Setup ($([math]::Round($datei.Length / 1KB)) KB, Kopf '$kopf')."
+                $setupPfad = $null
+            } else {
+                Write-Success "Setup geladen ($([math]::Round($datei.Length / 1MB, 2)) MB)."
+            }
+        }
     }
 
     Write-Info "Office Deployment Tool laeuft - das dauert einige Minuten (Download)."
