@@ -197,7 +197,7 @@ if (-not $wingetVerfuegbar) {
 $wingetApps = [ordered]@{
     '1'  = @{ Name = "7-Zip";                                     Id = "7zip.7zip" }
     '2'  = @{ Name = "Google Chrome";                              Id = "Google.Chrome" }
-    '3'  = @{ Name = "Adobe Acrobat Reader";                       Id = "Adobe.Acrobat.Reader.32-bit"; Modus = "Standard" }
+    '3'  = @{ Name = "Adobe Acrobat Reader";                       Id = "Adobe.Acrobat.Reader.64-bit"; Modus = "Standard"; Custom = "Adobe" }
     '4'  = @{ Name = "Mozilla Firefox (Deutsch)";                  Id = "Mozilla.Firefox.de" }
     '5'  = @{ Name = "LibreOffice";                                Id = "TheDocumentFoundation.LibreOffice" }
     '6'  = @{ Name = "Thunderbird (Deutsch)";                      Id = "Mozilla.Thunderbird.de" }
@@ -784,6 +784,15 @@ function Test-OutlookVorhanden {
                               "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\OUTLOOK.EXE")) {
         if (Test-Path $schluessel) { return $true }
     }
+    # Falls Office an einem ungewoehnlichen Ort liegt: im Office-Ordner suchen.
+    foreach ($wurzel in @((Join-Path $env:ProgramFiles 'Microsoft Office'),
+                          (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Office'))) {
+        if ($wurzel -and (Test-Path $wurzel)) {
+            $treffer = Get-ChildItem -Path $wurzel -Filter 'OUTLOOK.EXE' -Recurse -Depth 3 -ErrorAction SilentlyContinue |
+                       Select-Object -First 1
+            if ($treffer) { return $true }
+        }
+    }
     return $false
 }
 
@@ -897,8 +906,50 @@ function Install-Outlook {
         Write-ErrorMsg "Outlook wurde NICHT installiert (Exitcode $code)."
         $letzteZeilen = @($ausgabe | Where-Object { $_ -and "$_".Trim() } | Select-Object -Last 5)
         if ($letzteZeilen.Count -gt 0) { Write-Warn "    Ausgabe: $(($letzteZeilen -join ' | ').Trim())" }
+
+        # Zeigen, was wirklich vorliegt - bei Exitcode 0 ohne Ergebnis ist das
+        # der einzige Weg herauszufinden, was das Setup gemacht hat.
+        foreach ($wurzel in @((Join-Path $env:ProgramFiles 'Microsoft Office\root\Office16'),
+                              (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Office\root\Office16'))) {
+            if ($wurzel -and (Test-Path $wurzel)) {
+                $exen = @(Get-ChildItem -Path $wurzel -Filter '*.EXE' -ErrorAction SilentlyContinue |
+                          Select-Object -ExpandProperty Name)
+                Add-Diagnose "Office-Ordner '$wurzel': $(if ($exen.Count) { $exen -join ', ' } else { 'leer' })"
+            } else {
+                Add-Diagnose "Office-Ordner '$wurzel' existiert nicht."
+            }
+        }
+        $log = Get-ChildItem -Path $env:TEMP -Filter '*.log' -ErrorAction SilentlyContinue |
+               Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-30) -and $_.Name -match '(?i)setup|office|odt' } |
+               Sort-Object LastWriteTime -Descending | Select-Object -First 3
+        if ($log) { Add-Diagnose "Office-Protokolle: $(($log.FullName) -join ' | ')" }
+
         Add-Hinweis "Outlook manuell nachinstallieren."
     }
+}
+
+# Ein bereits vorhandener Acrobat Reader - auf Werksgeraeten oft die
+# 64-Bit-Fassung - laesst eine Installation der anderen Variante mit
+# MSI-Fehler 1603 scheitern. Deshalb vorher nachsehen, statt dagegen
+# anzurennen: ist schon einer da, bleibt er einfach drauf.
+function Install-Adobe {
+    param([string]$Id, [string]$Name)
+
+    $uninstallPfade = @(
+        "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    )
+    $vorhanden = @(Get-ItemProperty $uninstallPfade -ErrorAction SilentlyContinue |
+                   Where-Object { $_.DisplayName -and $_.DisplayName -match '(?i)acrobat' })
+
+    if ($vorhanden.Count -gt 0) {
+        Write-Success "$Name ist bereits vorhanden: $(($vorhanden.DisplayName | Select-Object -Unique) -join ', ')"
+        Write-Info "Wird nicht ueberinstalliert - eine zweite Variante wuerde mit Fehler 1603 abbrechen."
+        return
+    }
+
+    Install-WingetApp -Id $Id -Name $Name -Modus 'Standard'
 }
 
 if ($selectedApps.Count -gt 0) {
@@ -940,6 +991,8 @@ if ($selectedApps.Count -gt 0) {
         $app = $wingetApps[$nummer]
         if ($app.Custom -eq "Outlook") {
             Install-Outlook
+        } elseif ($app.Custom -eq "Adobe") {
+            Install-Adobe -Id $app.Id -Name $app.Name
         } else {
             $modus = if ($app.Modus) { $app.Modus } else { 'Still' }
             Install-WingetApp -Id $app.Id -Name $app.Name -Modus $modus
