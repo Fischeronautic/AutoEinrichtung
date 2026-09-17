@@ -173,14 +173,40 @@ function Wait-InstallerFrei {
 # ==========================================
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
+# Quelle, aus der sich das Skript bei Bedarf selbst neu startet.
+$script:SkriptQuelle = 'https://raw.githubusercontent.com/Fischeronautic/AutoEinrichtung/main/test.ps1'
+
 if (-not $isAdmin) {
     Write-Host ""
-    Write-ErrorMsg "FEHLER: Keine Administratorrechte erkannt!"
-    Write-Warn "Da dieses Skript direkt aus dem Internet laeuft, kann es sich nicht selbst als Admin neustarten."
-    Write-Warn "Bitte druecke auf 'Start', tippe 'PowerShell', waehle 'Als Administrator ausfuehren' und fuege deinen Link erneut ein."
+    Write-Warn "Keine Administratorrechte - das Skript startet sich selbst neu."
+    Write-Info "Bitte die Nachfrage von Windows mit 'Ja' bestaetigen."
     Write-Host ""
-    Read-Host "Druecke Enter, um den Vorgang abzubrechen..."
-    return
+
+    # Aus einer Datei gestartet wird die Datei erneut aufgerufen, per irm
+    # geladen wird sie erneut heruntergeladen. Der Zufallswert umgeht den
+    # Zwischenspeicher von GitHub, TLS 1.2 faengt aeltere Voreinstellungen ab.
+    if ($PSCommandPath) {
+        $neustartBefehl = "& '$PSCommandPath'"
+    } else {
+        $zufall = Get-Random
+        $neustartBefehl = "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; irm '$($script:SkriptQuelle)?x=$zufall' | iex"
+    }
+
+    try {
+        Start-Process -FilePath "powershell.exe" -Verb RunAs -ErrorAction Stop `
+                      -ArgumentList '-NoProfile', '-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', $neustartBefehl
+        Write-Success "Neues Fenster mit Administratorrechten wurde geoeffnet - dort geht es weiter."
+        Write-Info "Dieses Fenster kann geschlossen werden."
+        Start-Sleep -Seconds 3
+        return
+    } catch {
+        Write-Host ""
+        Write-ErrorMsg "Neustart als Administrator nicht moeglich: $($_.Exception.Message)"
+        Write-Warn "Bitte 'Start' druecken, 'PowerShell' tippen, 'Als Administrator ausfuehren' waehlen und den Link erneut einfuegen."
+        Write-Host ""
+        Read-Host "Druecke Enter, um den Vorgang abzubrechen..."
+        return
+    }
 }
 
 Write-Banner "Windows 11 Ersteinrichtung" "Basis-Einstellungen, Bloatware und Apps"
