@@ -706,6 +706,37 @@ if ($systemSetup) {
                     $teile = Split-Deinstallationsbefehl $app.UninstallString
                     Add-Diagnose "Deinstallation starten: Datei='$($teile.Datei)' Argumente='$($teile.Argumente)'"
 
+                    # Erst einen stillen Versuch. Fuer diese Deinstaller ist kein
+                    # stiller Schalter dokumentiert, deshalb wird nicht geglaubt,
+                    # sondern nachgesehen: verschwindet der Eintrag aus der
+                    # Programmliste, war es still. Sonst kommt das Fenster.
+                    $registrierungsPfad = $app.PSPath
+                    $stillGeschafft = $false
+
+                    if ($teile.Argumente -notmatch '(?i)silent|quiet|/qn|/s\b') {
+                        Write-Info "$($app.DisplayName): probiere zuerst eine stille Deinstallation..."
+                        try {
+                            $still = Start-Process -FilePath $teile.Datei `
+                                        -ArgumentList "$($teile.Argumente) /silent" `
+                                        -WindowStyle Hidden -PassThru -ErrorAction Stop
+                            $null = $still | Wait-Process -Timeout 60 -ErrorAction SilentlyContinue
+                            if (-not $still.HasExited) {
+                                Stop-Process -Id $still.Id -Force -ErrorAction SilentlyContinue
+                                Start-Sleep -Seconds 2
+                            }
+                            if ($registrierungsPfad -and -not (Test-Path $registrierungsPfad)) {
+                                $stillGeschafft = $true
+                            }
+                        } catch {
+                            Add-Diagnose "Stiller Versuch nicht moeglich: $($_.Exception.Message)"
+                        }
+                    }
+
+                    if ($stillGeschafft) {
+                        Write-Success "$($app.DisplayName) still deinstalliert - kein Fenster noetig."
+                        continue
+                    }
+
                     if ($teile.Argumente) {
                         $prozess = Start-Process -FilePath $teile.Datei -ArgumentList $teile.Argumente -PassThru -ErrorAction Stop
                     } else {
@@ -1073,25 +1104,6 @@ function Install-Outlook {
 if ($selectedApps.Count -gt 0) {
     Write-Schritt "App-Installation"
     Write-Info "Wird installiert: $((($selectedApps | ForEach-Object { $wingetApps[$_].Name })) -join ', ')"
-
-    # Offene GUI-Deinstallationen (McAfee & Co.) zuerst abwarten - sonst
-    # blockieren sie die App-Installation mit MSI-Exitcode 1618.
-    if ($script:AsyncJobs.Count -gt 0) {
-        $offene = @($script:AsyncJobs | Where-Object { -not $_.Prozess.HasExited })
-        if ($offene.Count -gt 0) {
-            Write-Warn "Es laufen noch Deinstallations-Fenster: $(($offene.Name) -join ', ')"
-            Write-Warn "Bitte diese jetzt fertig durchklicken - danach geht es automatisch weiter."
-            foreach ($job in $offene) {
-                $null = $job.Prozess | Wait-Process -Timeout 900 -ErrorAction SilentlyContinue
-                if ($job.Prozess.HasExited) {
-                    Write-Success "$($job.Name): Deinstallationsfenster geschlossen."
-                } else {
-                    Write-Warn "$($job.Name): Fenster nach 15 Minuten noch offen - es wird trotzdem weitergemacht."
-                    Add-Hinweis "$($job.Name): Deinstallation pruefen."
-                }
-            }
-        }
-    }
 
     # Quellen aktualisieren - auf frisch aufgesetzten Geraeten ist der
     # winget-Index oft veraltet, was zu sporadischen Fehlschlaegen fuehrt.
