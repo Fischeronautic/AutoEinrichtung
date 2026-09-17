@@ -98,6 +98,36 @@ function Set-RegValue {
     }
 }
 
+# Zerlegt einen Deinstallationsbefehl in Programm und Argumente.
+# Der Umweg ueber cmd.exe scheitert, wenn der Befehl Leerzeichen im Pfad hat,
+# aber keine eigenen Anfuehrungszeichen - cmd versucht dann 'C:\Program' zu
+# starten und beendet sich sofort, ohne dass ein Fenster stehen bleibt.
+function Split-Deinstallationsbefehl {
+    param([string]$Befehl)
+
+    $Befehl = $Befehl.Trim()
+
+    if ($Befehl.StartsWith('"')) {
+        $ende = $Befehl.IndexOf('"', 1)
+        if ($ende -gt 1) {
+            return [pscustomobject]@{
+                Datei     = $Befehl.Substring(1, $ende - 1)
+                Argumente = $Befehl.Substring($ende + 1).Trim()
+            }
+        }
+    }
+
+    $treffer = [regex]::Match($Befehl, '^(?<exe>.+?\.exe)\s*(?<rest>.*)$', 'IgnoreCase')
+    if ($treffer.Success) {
+        return [pscustomobject]@{
+            Datei     = $treffer.Groups['exe'].Value.Trim()
+            Argumente = $treffer.Groups['rest'].Value.Trim()
+        }
+    }
+
+    return [pscustomobject]@{ Datei = $Befehl; Argumente = '' }
+}
+
 # Windows laesst nur EINE MSI-Installation gleichzeitig zu. Laeuft schon eine
 # (Windows Update, Bloatware-Deinstallation, Store), scheitert winget mit
 # Exitcode 1618. Der Mutex 'Global\_MSIExecute' ist der offizielle Weg, das zu pruefen.
@@ -673,9 +703,25 @@ if ($systemSetup) {
                 # und weiterarbeiten. Der Techniker klickt es nebenbei durch.
                 Write-Warn "$($app.DisplayName): keine stille Deinstallation moeglich - Fenster wird geoeffnet, Skript laeuft weiter."
                 try {
-                    $prozess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$($app.UninstallString)`"" -PassThru -ErrorAction Stop
-                    $script:AsyncJobs.Add([pscustomobject]@{ Name = $app.DisplayName; Prozess = $prozess })
-                    Add-Hinweis "$($app.DisplayName): Deinstallationsfenster wurde geoeffnet - bitte durchklicken."
+                    $teile = Split-Deinstallationsbefehl $app.UninstallString
+                    Add-Diagnose "Deinstallation starten: Datei='$($teile.Datei)' Argumente='$($teile.Argumente)'"
+
+                    if ($teile.Argumente) {
+                        $prozess = Start-Process -FilePath $teile.Datei -ArgumentList $teile.Argumente -PassThru -ErrorAction Stop
+                    } else {
+                        $prozess = Start-Process -FilePath $teile.Datei -PassThru -ErrorAction Stop
+                    }
+
+                    # Kurz nachsehen, ob wirklich etwas stehen bleibt. Beendet sich
+                    # der Aufruf sofort, kam auch kein Fenster - dann lieber sagen.
+                    Start-Sleep -Seconds 3
+                    if ($prozess.HasExited) {
+                        Write-ErrorMsg "$($app.DisplayName): Deinstaller hat sich sofort beendet (Exitcode $($prozess.ExitCode)) - es kam kein Fenster."
+                        Add-Hinweis "$($app.DisplayName) ueber 'Apps & Features' von Hand deinstallieren."
+                    } else {
+                        $script:AsyncJobs.Add([pscustomobject]@{ Name = $app.DisplayName; Prozess = $prozess })
+                        Add-Hinweis "$($app.DisplayName): Deinstallationsfenster wurde geoeffnet - bitte durchklicken."
+                    }
                 } catch {
                     Write-ErrorMsg "$($app.DisplayName): Deinstallation konnte nicht gestartet werden: $($_.Exception.Message)"
                     Add-Hinweis "$($app.DisplayName) manuell deinstallieren."
