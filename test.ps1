@@ -706,45 +706,17 @@ if ($systemSetup) {
                     $teile = Split-Deinstallationsbefehl $app.UninstallString
                     Add-Diagnose "Deinstallation starten: Datei='$($teile.Datei)' Argumente='$($teile.Argumente)'"
 
-                    # Erst einen stillen Versuch. Fuer diese Deinstaller ist kein
-                    # stiller Schalter dokumentiert, deshalb wird nicht geglaubt,
-                    # sondern nachgesehen: verschwindet der Eintrag aus der
-                    # Programmliste, war es still. Sonst kommt das Fenster.
-                    $registrierungsPfad = $app.PSPath
-                    $stillGeschafft = $false
-
-                    if ($teile.Argumente -notmatch '(?i)silent|quiet|/qn|/s\b') {
-                        Write-Info "$($app.DisplayName): probiere zuerst eine stille Deinstallation..."
-                        try {
-                            $still = Start-Process -FilePath $teile.Datei `
-                                        -ArgumentList "$($teile.Argumente) /silent" `
-                                        -WindowStyle Hidden -PassThru -ErrorAction Stop
-                            $null = $still | Wait-Process -Timeout 60 -ErrorAction SilentlyContinue
-                            if (-not $still.HasExited) {
-                                Stop-Process -Id $still.Id -Force -ErrorAction SilentlyContinue
-                                Start-Sleep -Seconds 2
-                            }
-                            if ($registrierungsPfad -and -not (Test-Path $registrierungsPfad)) {
-                                $stillGeschafft = $true
-                            }
-                        } catch {
-                            Add-Diagnose "Stiller Versuch nicht moeglich: $($_.Exception.Message)"
-                        }
-                    }
-
-                    if ($stillGeschafft) {
-                        Write-Success "$($app.DisplayName) still deinstalliert - kein Fenster noetig."
-                        continue
-                    }
-
                     if ($teile.Argumente) {
                         $prozess = Start-Process -FilePath $teile.Datei -ArgumentList $teile.Argumente -PassThru -ErrorAction Stop
                     } else {
                         $prozess = Start-Process -FilePath $teile.Datei -PassThru -ErrorAction Stop
                     }
 
-                    # Kurz nachsehen, ob wirklich etwas stehen bleibt. Beendet sich
-                    # der Aufruf sofort, kam auch kein Fenster - dann lieber sagen.
+                    # Ein stiller Schalter existiert fuer diese Deinstaller nicht:
+                    # mc-update.exe /uninstall /silent oeffnet trotzdem ein Fenster
+                    # und bleibt bei 0 Prozent stehen. Deshalb gleich der normale Weg.
+                    # Kurz nachsehen, ob wirklich etwas stehen bleibt - beendet sich
+                    # der Aufruf sofort, kam auch kein Fenster.
                     Start-Sleep -Seconds 3
                     if ($prozess.HasExited) {
                         Write-ErrorMsg "$($app.DisplayName): Deinstaller hat sich sofort beendet (Exitcode $($prozess.ExitCode)) - es kam kein Fenster."
