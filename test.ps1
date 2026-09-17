@@ -567,6 +567,7 @@ if ($systemSetup) {
     Write-Schritt "Bloatware-Bereinigung"
     Write-Info "Starte Bloatware-Bereinigung (Suche nach Junk-Apps)..."
     $bloatwareList = @("McAfee", "WebAdvisor", "Norton", "ExpressVPN", "Dropbox", "TikTok", "Instagram", "Facebook", "Spotify", "WhatsApp")
+    $gefundeneProgramme = 0
 
     $uninstallPaths = @(
         "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
@@ -618,7 +619,12 @@ if ($systemSetup) {
         $desktopApps = @(Get-ItemProperty $uninstallPaths -ErrorAction SilentlyContinue |
                          Where-Object { $_.DisplayName -and $_.DisplayName -like "*$junk*" })
 
+        if ($desktopApps.Count -gt 0) {
+            Write-Info "Programm gefunden zu '$junk': $(($desktopApps.DisplayName | Select-Object -Unique) -join ', ')"
+        }
+
         foreach ($app in $desktopApps) {
+            $gefundeneProgramme++
 
             # DIAGNOSE: exakte Uninstall-Daten protokollieren. Damit laesst sich
             # spaeter der wirklich stille Befehl fest einbauen, statt zu raten.
@@ -677,7 +683,12 @@ if ($systemSetup) {
             }
         }
     }
-    Write-Success "Bloatware-Pruefung abgeschlossen (offene Fenster laufen im Hintergrund weiter)."
+    if ($gefundeneProgramme -eq 0) {
+        Write-Success "Bloatware-Pruefung abgeschlossen - keine klassischen Programme gefunden."
+        Write-Info "Falls trotzdem etwas in 'Apps & Features' steht, sag mir den genauen Namen."
+    } else {
+        Write-Success "Bloatware-Pruefung abgeschlossen - $gefundeneProgramme Programm(e) behandelt."
+    }
 }
 
 # ==========================================
