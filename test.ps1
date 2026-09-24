@@ -281,34 +281,13 @@ $wingetApps = [ordered]@{
 # Standard-Paket fuer die Schnellauswahl (Adobe zuletzt, da interaktiv)
 $standardApps = @('1', '2', '4', '3')
 
-# App-Auswahl per Klickliste (Out-GridView). Faellt automatisch auf die
-# Nummerneingabe zurueck, wenn Out-GridView nicht vorhanden ist oder das
-# Fenster nicht geoeffnet werden kann.
+# App-Auswahl ueber Nummerneingabe. Eine Klickliste per Out-GridView war
+# zwischenzeitlich eingebaut, hat sich im Alltag aber als Umweg erwiesen:
+# das Fenster reisst den Fokus aus der Konsole und landet mitunter dahinter,
+# und Tippen ist bei taeglicher Nutzung schneller als Anklicken.
 function Select-Apps {
     param([System.Collections.Specialized.OrderedDictionary]$Apps)
 
-    $liste = foreach ($key in $Apps.Keys) {
-        [pscustomobject]@{
-            Nr    = [int]$key
-            App   = $Apps[$key].Name
-            Paket = $(if ($Apps[$key].Id) { $Apps[$key].Id } else { 'Office Deployment Tool' })
-        }
-    }
-
-    if (Get-Command Out-GridView -ErrorAction SilentlyContinue) {
-        try {
-            Write-Info "Auswahlfenster wurde geoeffnet - mehrere Eintraege mit gedrueckter Strg-Taste anklicken, dann OK."
-            $auswahl = $liste | Sort-Object Nr |
-                       Out-GridView -Title "Apps auswaehlen (Mehrfachauswahl mit Strg) - dann auf OK klicken" -PassThru
-            return @($auswahl | ForEach-Object { "$($_.Nr)" })
-        } catch {
-            Write-Warn "Auswahlfenster nicht verfuegbar ($($_.Exception.Message)) - bitte Nummern eintippen."
-        }
-    } else {
-        Write-Warn "Auswahlfenster nicht verfuegbar - bitte Nummern eintippen."
-    }
-
-    # --- Fallback: Nummerneingabe ---
     Write-Host ""
     Write-Host "  Verfuegbare Apps:" -ForegroundColor Cyan
     foreach ($key in $Apps.Keys) {
