@@ -174,7 +174,12 @@ function Wait-InstallerFrei {
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
 # Quelle, aus der sich das Skript bei Bedarf selbst neu startet.
-$script:SkriptQuelle = 'https://raw.githubusercontent.com/Fischeronautic/AutoEinrichtung/main/test.ps1'
+# ===== HIER AENDERN, wenn alles auf eine eigene Domain umzieht =====
+# Alle weiteren Adressen leiten sich daraus ab.
+$script:BasisUrl = 'https://raw.githubusercontent.com/Fischeronautic/AutoEinrichtung/main'
+
+$script:SkriptQuelle   = "$($script:BasisUrl)/test.ps1"
+$script:OfficeSetupUrl = "$($script:BasisUrl)/office/OfficeSetup.exe"
 
 if (-not $isAdmin) {
     Write-Host ""
@@ -899,6 +904,16 @@ function Test-OutlookVorhanden {
 #
 # WICHTIG: --override ERSETZT die Installer-Argumente. Nur '/configure <xml>'
 # ist hier gueltig - ein 'Language=de-de' allein bewirkt nichts.
+# Installiert Microsoft 365 einschliesslich Outlook.
+#
+# Weg ueber winget scheiterte dauerhaft: das Paket Microsoft.Office bringt
+# -1978335215, weil Microsofts setup.exe auf dem CDN neuer ist als der im
+# Manifest hinterlegte Pruefwert. Das Deployment Tool wiederum beendete sich
+# mit /configure wortlos und ohne Wirkung.
+#
+# Stattdessen der Click-to-Run-Bootstrapper. Der nimmt Produkt, Sprache und
+# Plattform direkt als Parameter entgegen - die Liste steht im Programm selbst:
+#   prid=[value] culture=[value] platform=[value] token=[value] tx=[value]
 function Install-Outlook {
 
     if (Test-OutlookVorhanden) {
@@ -908,7 +923,7 @@ function Install-Outlook {
 
     $produkt   = 'O365HomePremRetail'
     $sprache   = 'de-de'
-    $plattform = '64'
+    $plattform = 'x64'
 
     $c2rPfad = @(
         "HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration",
@@ -919,8 +934,8 @@ function Install-Outlook {
         $cfg = Get-ItemProperty -Path $c2rPfad -ErrorAction SilentlyContinue
         if ($cfg.ProductReleaseIds) {
             # OneNote, Visio und Project sind Beiprodukte - gesucht ist das
-            # eigentliche Office. Auf Werksgeraeten steht z.B.
-            # 'OneNoteFreeRetail,O365HomePremRetail' im Schluessel.
+            # eigentliche Office. Werksgeraete fuehren beides im Schluessel,
+            # und die Reihenfolge darin ist nicht verlaesslich.
             $kandidaten = @($cfg.ProductReleaseIds -split ',' |
                             ForEach-Object { $_.Trim() } |
                             Where-Object { $_ -and $_ -notmatch '(?i)visio|project|onenote' })
@@ -929,121 +944,55 @@ function Install-Outlook {
             if ($vorhanden) { $produkt = $vorhanden }
         }
         if ($cfg.ClientCulture) { $sprache = $cfg.ClientCulture }
-        if ($cfg.Platform -eq 'x86') { $plattform = '32' }
-        Write-Info "Vorhandene Office-Installation erkannt: $produkt / $sprache / ${plattform}-Bit"
+        if ($cfg.Platform -eq 'x86') { $plattform = 'x86' }
+        Write-Info "Vorhandene Office-Installation erkannt: $produkt / $sprache / $plattform"
     } else {
-        Write-Info "Keine Click-to-Run-Installation gefunden - Neuinstallation mit $produkt / $sprache / ${plattform}-Bit"
+        Write-Info "Keine Click-to-Run-Installation gefunden - Neuinstallation mit $produkt / $sprache / $plattform"
     }
 
-    # Eigener Protokollordner - das Setup schreibt dort mit, was es tut.
-    $logOrdner = Join-Path $env:SystemRoot "Temp\AutoEinrichtungOffice"
-    Remove-Item -Path $logOrdner -Recurse -Force -ErrorAction SilentlyContinue
-    New-Item -Path $logOrdner -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+    $arbeitsOrdner = Join-Path $env:SystemRoot "Temp\AutoEinrichtungOffice"
+    Remove-Item -Path $arbeitsOrdner -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -Path $arbeitsOrdner -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+    $setupPfad = Join-Path $arbeitsOrdner "OfficeSetup.exe"
 
-    # Bewusst OHNE ExcludeApp: ein Ausschluss wuerde bereits vorhandene
-    # Programme wie Word oder Excel aus der Installation ENTFERNEN.
-    $officeXml = @"
-<Configuration>
-  <Add OfficeClientEdition="$plattform">
-    <Product ID="$produkt">
-      <Language ID="$sprache" />
-    </Product>
-  </Add>
-  <Display Level="None" AcceptEULA="TRUE" />
-  <Property Name="FORCEAPPSHUTDOWN" Value="TRUE" />
-  <Logging Level="Standard" Path="$logOrdner" />
-</Configuration>
-"@
-
-    # Pfade OHNE Leerzeichen - erspart Anfuehrungszeichen-Aerger.
-    $xmlPfad = Join-Path $logOrdner "configuration.xml"
+    Write-Info "Lade Office-Setup..."
     try {
-        # ASCII statt UTF8: Windows PowerShell schreibt bei UTF8 eine
-        # Bytefolgemarke an den Dateianfang. Der Inhalt ist reines ASCII,
-        # damit ist die Datei garantiert ohne Vorspann.
-        Set-Content -Path $xmlPfad -Value $officeXml -Encoding ASCII -Force -ErrorAction Stop
+        Invoke-WebRequest -Uri $script:OfficeSetupUrl -OutFile $setupPfad -UseBasicParsing -ErrorAction Stop
     } catch {
-        Write-ErrorMsg "Office-Konfiguration konnte nicht geschrieben werden: $($_.Exception.Message)"
+        Write-ErrorMsg "Office-Setup konnte nicht geladen werden: $($_.Exception.Message)"
+        Add-Diagnose "Adresse: $($script:OfficeSetupUrl)"
+        Add-Hinweis "Outlook manuell nachinstallieren."
         return
     }
+
+    # Nicht ungeprueft starten - eine leere oder falsche Datei laeuft klaglos
+    # und tut nichts. Genau das hat uns vorher lange beschaeftigt.
+    $datei = Get-Item -Path $setupPfad -ErrorAction SilentlyContinue
+    $kopf  = ''
+    if ($datei) {
+        try { $kopf = -join ([System.IO.File]::ReadAllBytes($setupPfad)[0..1] | ForEach-Object { [char]$_ }) } catch { }
+    }
+    if (-not $datei -or $datei.Length -lt 1MB -or $kopf -ne 'MZ') {
+        Write-ErrorMsg "Die geladene Datei ist kein lauffaehiges Setup ($([math]::Round(($datei.Length) / 1KB)) KB, Kopf '$kopf')."
+        Add-Diagnose "Adresse: $($script:OfficeSetupUrl)"
+        Add-Hinweis "Outlook manuell nachinstallieren."
+        return
+    }
+    Write-Success "Setup geladen ($([math]::Round($datei.Length / 1MB, 2)) MB)."
 
     $null = Wait-InstallerFrei -MaxSekunden 900
 
-    # Setup direkt von Microsoft holen statt ueber das winget-Paket.
-    # Microsoft aktualisiert diese setup.exe oefter als das winget-Manifest
-    # gepflegt wird, dadurch scheitert 'winget install Microsoft.Office'
-    # regelmaessig mit 0x8A150011 (Hash stimmt nicht). Dieselbe Datei,
-    # dieselbe Quelle, nur ohne das veraltete Manifest dazwischen.
-    $setupPfad = Join-Path $logOrdner "setup.exe"
-    $ausgabe   = @()
-    $code      = $null
-
-    Write-Info "Lade Office-Setup von Microsoft..."
+    Write-Info "Office wird installiert - das dauert einige Minuten (Download)."
     try {
-        Invoke-WebRequest -Uri "https://officecdn.microsoft.com/pr/wsus/setup.exe" `
-                          -OutFile $setupPfad -UseBasicParsing -ErrorAction Stop
+        $prozess = Start-Process -FilePath $setupPfad `
+                      -ArgumentList "culture=$sprache", "platform=$plattform", "prid=$produkt" `
+                      -WorkingDirectory $arbeitsOrdner -PassThru -Wait -ErrorAction Stop
+        $code = $prozess.ExitCode
     } catch {
-        Write-Warn "Download fehlgeschlagen ($($_.Exception.Message)) - versuche es ueber winget."
-        $setupPfad = $null
-    }
-
-    # Datei pruefen, bevor sie gestartet wird. Eine leere oder falsche Datei
-    # startet klaglos und tut nichts - genau das war bisher nicht erkennbar.
-    if ($setupPfad) {
-        $datei = Get-Item -Path $setupPfad -ErrorAction SilentlyContinue
-        if (-not $datei) {
-            Write-Warn "Heruntergeladene Datei nicht auffindbar - versuche es ueber winget."
-            $setupPfad = $null
-        } else {
-            $kopf = ''
-            try {
-                $rohbytes = [System.IO.File]::ReadAllBytes($setupPfad)[0..1]
-                $kopf = -join ($rohbytes | ForEach-Object { [char]$_ })
-            } catch { }
-
-            Add-Diagnose "Office-Setup geladen: $([math]::Round($datei.Length / 1MB, 2)) MB, Dateikopf '$kopf'"
-
-            if ($datei.Length -lt 500KB -or $kopf -ne 'MZ') {
-                Write-ErrorMsg "Die heruntergeladene Datei ist kein lauffaehiges Setup ($([math]::Round($datei.Length / 1KB)) KB, Kopf '$kopf')."
-                $setupPfad = $null
-            } else {
-                Write-Success "Setup geladen ($([math]::Round($datei.Length / 1MB, 2)) MB)."
-            }
-        }
-    }
-
-    Write-Info "Office Deployment Tool laeuft - das dauert einige Minuten (Download)."
-    try {
-        if ($setupPfad) {
-            # /configure ist der vorgesehene Schalter des Deployment Tools.
-            # Was dabei passiert, steht im Protokollordner.
-            # Arbeitsverzeichnis auf den Ordner setzen, in dem setup.exe und
-            # configuration.xml liegen. Aus C:\Windows\system32 heraus gestartet
-            # beendete sich das Setup wortlos mit 0 - so laeuft es auch von Hand.
-            $ausgabeDatei = Join-Path $logOrdner "setup_ausgabe.txt"
-            $fehlerDatei  = Join-Path $logOrdner "setup_fehler.txt"
-            $prozess = Start-Process -FilePath $setupPfad -ArgumentList '/configure', 'configuration.xml' `
-                          -WorkingDirectory $logOrdner -PassThru -Wait -ErrorAction Stop `
-                          -RedirectStandardOutput $ausgabeDatei -RedirectStandardError $fehlerDatei
-            $code = $prozess.ExitCode
-            foreach ($datei in @($ausgabeDatei, $fehlerDatei)) {
-                if (Test-Path $datei) {
-                    $inhalt = @(Get-Content -Path $datei -ErrorAction SilentlyContinue | Where-Object { $_.Trim() })
-                    foreach ($zeile in ($inhalt | Select-Object -Last 5)) { Add-Diagnose "Setup sagt: $($zeile.Trim())" }
-                }
-            }
-        } else {
-            $ausgabe = & winget.exe install --id Microsoft.Office -e --source winget `
-                          --accept-package-agreements --accept-source-agreements `
-                          --override "/configure $xmlPfad" 2>&1
-            $code = $LASTEXITCODE
-        }
-    } catch {
-        Write-ErrorMsg "Outlook: Installation konnte nicht gestartet werden: $($_.Exception.Message)"
-        Remove-Item -Path $xmlPfad -Force -ErrorAction SilentlyContinue
+        Write-ErrorMsg "Office-Setup konnte nicht gestartet werden: $($_.Exception.Message)"
+        Add-Hinweis "Outlook manuell nachinstallieren."
         return
     }
-
 
     # Entscheidend ist nicht der Exitcode, sondern ob Outlook danach da ist.
     if (Test-OutlookVorhanden) {
@@ -1051,50 +1000,15 @@ function Install-Outlook {
         Add-Hinweis "Outlook: beim ersten Start meldet sich der Kunde mit seinem Microsoft-Konto an."
     } else {
         Write-ErrorMsg "Outlook wurde NICHT installiert (Exitcode $code)."
-        $letzteZeilen = @($ausgabe | Where-Object { $_ -and "$_".Trim() } | Select-Object -Last 5)
-        if ($letzteZeilen.Count -gt 0) { Write-Warn "    Ausgabe: $(($letzteZeilen -join ' | ').Trim())" }
-
-        # Zeigen, was wirklich vorliegt - bei Exitcode 0 ohne Ergebnis ist das
-        # der einzige Weg herauszufinden, was das Setup gemacht hat.
+        Add-Diagnose "Aufruf war: OfficeSetup.exe culture=$sprache platform=$plattform prid=$produkt"
         foreach ($wurzel in @((Join-Path $env:ProgramFiles 'Microsoft Office\root\Office16'),
                               (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Office\root\Office16'))) {
             if ($wurzel -and (Test-Path $wurzel)) {
                 $exen = @(Get-ChildItem -Path $wurzel -Filter '*.EXE' -ErrorAction SilentlyContinue |
                           Select-Object -ExpandProperty Name)
                 Add-Diagnose "Office-Ordner '$wurzel': $(if ($exen.Count) { $exen -join ', ' } else { 'leer' })"
-            } else {
-                Add-Diagnose "Office-Ordner '$wurzel' existiert nicht."
             }
         }
-        # Die Ausschlussliste der vorhandenen Installation zeigen. Bei
-        # vorinstalliertem Microsoft 365 ist Outlook dort oft eingetragen,
-        # und genau das laesst /configure unangetastet.
-        if ($c2rPfad) {
-            $alleWerte = Get-ItemProperty -Path $c2rPfad -ErrorAction SilentlyContinue
-            foreach ($name in @($alleWerte.PSObject.Properties.Name |
-                                Where-Object { $_ -match '(?i)excluded|productrelease|clientculture|platform|updatechannel|versiontoreport' })) {
-                Add-Diagnose "C2R $name = $($alleWerte.$name)"
-            }
-        }
-
-        # Protokoll des Setups direkt anzeigen - da steht der eigentliche Grund.
-        $log = Get-ChildItem -Path $logOrdner -Filter '*.log' -Recurse -ErrorAction SilentlyContinue |
-               Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        if ($log) {
-            Add-Diagnose "Setup-Protokoll: $($log.FullName)"
-            $zeilen = @(Get-Content -Path $log.FullName -ErrorAction SilentlyContinue |
-                        Where-Object { $_ -match '(?i)error|fail|abort|denied|invalid|not found' } |
-                        Select-Object -Last 8)
-            if ($zeilen.Count -eq 0) {
-                $zeilen = @(Get-Content -Path $log.FullName -ErrorAction SilentlyContinue | Select-Object -Last 8)
-            }
-            foreach ($zeile in $zeilen) { Add-Diagnose "   $($zeile.Trim())" }
-        } else {
-            $inhalt = @(Get-ChildItem -Path $logOrdner -Recurse -File -ErrorAction SilentlyContinue |
-                        Select-Object -ExpandProperty Name)
-            Add-Diagnose "Kein Setup-Protokoll. Inhalt von '$logOrdner': $(if ($inhalt.Count) { $inhalt -join ', ' } else { 'leer' })"
-        }
-
         Add-Hinweis "Outlook manuell nachinstallieren."
     }
 }
