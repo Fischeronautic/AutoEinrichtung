@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>Chiffrierscheibe</title>
+<style>
+:root{--creme:#F3ECDD;--blau:#1F2F4F;--hl:#B5482A;--tisch:#2a1f15;--neigung:25deg}
+*{box-sizing:border-box}
+html{background:var(--tisch)}
+html,body{margin:0;padding:0}
+body{min-height:100vh;color:#EDE3CC;font-family:"Courier New",Courier,monospace;-webkit-text-size-adjust:100%;overflow-x:hidden;
+ background:radial-gradient(ellipse 90% 70% at 50% 38%,#6e5439 0%,#56412c 45%,#3a2b1d 75%,#241a11 100%)}
+main{max-width:560px;margin:0 auto;padding:16px 16px 32px}
+header{border-bottom:1px solid rgba(237,227,204,.45);padding-bottom:8px;margin-bottom:10px}
+.az{font-size:13px;letter-spacing:.03em;margin:0}
+h1{font-size:20px;font-weight:bold;margin:6px 0 0;letter-spacing:.04em}
+
+.buehne{position:relative;width:92%;max-width:440px;margin:0 auto;perspective:1300px;perspective-origin:50% 50%;
+ touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;cursor:grab}
+.buehne::before{content:"";display:block;padding-top:100%}
+.buehne.zieht{cursor:grabbing}
+.kipp{position:absolute;inset:0;transform-origin:50% 50%;transform:rotateX(var(--neigung));transition:transform .45s ease}
+.flach .kipp{transform:rotateX(0deg)}
+.lage{position:absolute;inset:0;border-radius:50%;pointer-events:none}
+.schatten{inset:0;background:radial-gradient(closest-side,rgba(0,0,0,.6),rgba(0,0,0,.42) 78%,rgba(0,0,0,0) 100%);transform:translate(2%,4.5%)}
+.kante{inset:.5%}
+.k1{transform:translateY(2.2%);background:#3b2b0e}
+.k2{transform:translateY(1.6%);background:#4d3914}
+.k3{transform:translateY(1.0%);background:#5e461a}
+.k4{transform:translateY(.5%);background:#6e5320}
+.messing{inset:.5%;background:
+ radial-gradient(circle at 30% 24%,rgba(255,250,225,.30),rgba(255,250,225,0) 42%),
+ repeating-conic-gradient(from 0deg,rgba(255,255,255,.06) 0deg .5deg,rgba(0,0,0,.06) .5deg 1.1deg),
+ conic-gradient(from 0deg,#c9a24f 0deg,#a98634 45deg,#c9a24f 90deg,#dcbc6c 135deg,#c09a48 180deg,#97762b 225deg,#c9a24f 270deg,#f2db96 315deg,#c9a24f 360deg)}
+.glanz{inset:.5%;background:
+ radial-gradient(circle at 27% 20%,rgba(255,255,255,.26),rgba(255,255,255,0) 38%),
+ radial-gradient(circle at 78% 85%,rgba(0,0,0,.16),rgba(0,0,0,0) 45%)}
+svg.scheibe{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.scheibe text{font-family:"Courier New",Courier,monospace;font-weight:bold;text-anchor:middle;dominant-baseline:central;pointer-events:none}
+.ta{fill:#2a1c06}
+.ta-k{fill:rgba(255,244,205,.8)}
+.ti{fill:#EADFC2}
+.ti-k{fill:rgba(0,0,0,.65)}
+.seg-a{fill:rgba(0,0,0,0);stroke:rgba(60,40,10,.6);stroke-width:.8}
+.seg-i{fill:var(--blau);stroke:#33497a;stroke-width:.8}
+.seg-a.hl{fill:var(--hl)}
+.seg-i.hl{fill:var(--hl)}
+.feld.hl text{fill:#F7F0E0}
+
+h2{font-size:15px;font-weight:bold;margin:14px 0 8px;letter-spacing:.02em}
+.tasten{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+button{font-family:"Courier New",Courier,monospace;font-weight:bold;min-height:48px;min-width:44px;padding:0;
+ background:linear-gradient(#F3ECDD,#E3D7BE);color:var(--blau);border:1px solid #17110a;border-radius:3px;box-shadow:0 2px 0 #17110a;
+ -webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.tasten button{font-size:20px}
+button:active{background:var(--blau);color:var(--creme);transform:translateY(1px);box-shadow:0 1px 0 #17110a}
+.reihe{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+.reihe button{font-size:16px}
+.ansicht .an{text-decoration:underline;text-underline-offset:3px}
+.ansicht .aus{opacity:.55}
+.anl{font-size:14px;margin:20px 0 0;border-top:1px solid rgba(237,227,204,.35);padding-top:10px}
+@media (max-width:440px){.reihe{grid-template-columns:1fr}}
+@media (min-width:600px){.tasten{grid-template-columns:repeat(9,1fr)}}
+@media (prefers-reduced-motion:reduce){.kipp{transition:none}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<p class="az">SoKo Rabenstein, Az. 24/2026, Kalender B, Tag 16</p>
+<h1>Chiffrierscheibe (Nachbildung)</h1>
+</header>
+<div class="buehne" id="buehne">
+ <div class="kipp" id="kipp">
+  <div class="lage schatten"></div>
+  <div class="lage kante k1"></div>
+  <div class="lage kante k2"></div>
+  <div class="lage kante k3"></div>
+  <div class="lage kante k4"></div>
+  <div class="lage messing"></div>
+  <svg class="scheibe" id="scheibe" viewBox="0 0 400 400" role="img" aria-label="Chiffrierscheibe">
+   <defs>
+    <linearGradient id="fase" x1="0" y1="0" x2="1" y2="1">
+     <stop offset="0" stop-color="#fff3c8"/><stop offset=".45" stop-color="#c9a24f"/><stop offset="1" stop-color="#4f3a12"/>
+    </linearGradient>
+    <linearGradient id="faseAussen" x1="0" y1="0" x2="1" y2="1">
+     <stop offset="0" stop-color="#fff6d6" stop-opacity=".9"/><stop offset=".5" stop-color="#c9a24f" stop-opacity=".3"/><stop offset="1" stop-color="#3b2b0e" stop-opacity=".9"/>
+    </linearGradient>
+    <radialGradient id="ringSchatten" cx=".5" cy=".5" r=".5">
+     <stop offset=".88" stop-color="#000" stop-opacity=".5"/><stop offset="1" stop-color="#000" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="niete" cx=".35" cy=".3" r=".75">
+     <stop offset="0" stop-color="#fbeab0"/><stop offset=".55" stop-color="#c79f4b"/><stop offset="1" stop-color="#6e5018"/>
+    </radialGradient>
+   </defs>
+   <circle cx="200" cy="200" r="197" fill="none" stroke="url(#faseAussen)" stroke-width="2.5"/>
+   <g id="aussenKopie" class="ta-k" transform="translate(.7 .9)"></g>
+   <g id="aussen"></g>
+   <circle cx="205" cy="209" r="164" fill="url(#ringSchatten)"/>
+   <circle cx="200" cy="206" r="151" fill="#3b2b0e"/>
+   <circle cx="200" cy="204" r="151" fill="#5e461a"/>
+   <circle cx="200" cy="202" r="151" fill="#7a5c24"/>
+   <circle cx="200" cy="200" r="151" fill="#1a2742"/>
+   <g id="innen"></g>
+   <g transform="translate(-.7 -.9)"><g id="innenKopie" class="ti-k"></g></g>
+   <g id="innenText" class="ti"></g>
+   <circle cx="200" cy="200" r="98" fill="none" stroke="#0c1424" stroke-width="1.4"/>
+   <circle cx="200.6" cy="200.8" r="98" fill="none" stroke="rgba(255,255,255,.22)" stroke-width=".8"/>
+   <circle cx="200" cy="200" r="150" fill="none" stroke="url(#fase)" stroke-width="3.2"/>
+   <circle cx="202" cy="203.5" r="16" fill="rgba(0,0,0,.45)"/>
+   <circle cx="200" cy="200" r="15" fill="url(#niete)" stroke="#5a4114" stroke-width=".8"/>
+   <g transform="rotate(-35 200 200)">
+    <rect x="187" y="198.2" width="26" height="3.6" rx="1.4" fill="#2a1d08"/>
+    <line x1="188" y1="202.4" x2="212" y2="202.4" stroke="rgba(255,240,190,.75)" stroke-width=".7"/>
+   </g>
+  </svg>
+  <div class="lage glanz"></div>
+ </div>
+</div>
+<h2>Diesen Buchstaben unter das A drehen</h2>
+<div class="tasten" id="tasten"></div>
+<div class="reihe">
+ <button type="button" id="start">Zurück auf Start</button>
+ <button type="button" class="ansicht" id="ansicht" aria-pressed="true">Ansicht: <span id="v3">3D</span> / <span id="vf">flach</span></button>
+</div>
+<p class="anl">Anleitung: siehe Türchen 16.</p>
+</main>
+<script>
+(function(){
+var NS="http://www.w3.org/2000/svg";
+var AUSSEN="ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+var INNEN="VBNMKLJUIYDHOPXZGTRFEWQASC".split("");
+var N=26,STEP=360/N,C=200,NEIGUNG=25,PERSP=1300;
+var buehne=document.getElementById("buehne");
+var gA=document.getElementById("aussen"),gAK=document.getElementById("aussenKopie");
+var gI=document.getElementById("innen"),gIK=document.getElementById("innenKopie"),gIT=document.getElementById("innenText");
+var ruhig=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+var winkel=0,neigung=NEIGUNG,segA=[],segI=[],feldA=[],anim=null;
+
+function pol(r,a){var t=(a-90)*Math.PI/180;return [C+r*Math.cos(t),C+r*Math.sin(t)];}
+function sektor(r1,r2,a1,a2){
+  var p1=pol(r2,a1),p2=pol(r2,a2),p3=pol(r1,a2),p4=pol(r1,a1);
+  return "M"+p1+"A"+r2+","+r2+" 0 0 1 "+p2+"L"+p3+"A"+r1+","+r1+" 0 0 0 "+p4+"Z";
+}
+function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+function txt(b,i,r,fs,cls){
+  var t=el("text",{x:C,y:C-r,"font-size":fs,transform:"rotate("+(i*STEP)+" "+C+" "+C+")"});
+  if(cls)t.setAttribute("class",cls);
+  t.textContent=b;return t;
+}
+for(var i=0;i<N;i++){
+  // Außenring (fest)
+  var f=el("g",{"class":"feld","data-a":i,"data-b":AUSSEN[i]});
+  var p=el("path",{d:sektor(151,197,i*STEP-STEP/2,i*STEP+STEP/2),"class":"seg-a"});
+  f.appendChild(p);f.appendChild(txt(AUSSEN[i],i,174,30,"ta"));
+  gA.appendChild(f);segA.push(p);feldA.push(f);
+  gAK.appendChild(txt(AUSSEN[i],i,174,30));
+  // Innenring (drehbar)
+  var g=el("g",{"data-i":i});
+  var q=el("path",{d:sektor(98,149,i*STEP-STEP/2,i*STEP+STEP/2),"class":"seg-i"});
+  g.appendChild(q);gI.appendChild(g);segI.push(q);
+  gIK.appendChild(txt(INNEN[i],i,124,28));
+  gIT.appendChild(txt(INNEN[i],i,124,28));
+}
+
+function setze(w){
+  winkel=w;var t="rotate("+w+" "+C+" "+C+")";
+  gI.setAttribute("transform",t);gIK.setAttribute("transform",t);gIT.setAttribute("transform",t);
+}
+function versatz(){return ((Math.round(-winkel/STEP)%N)+N)%N;}
+function aus(){for(var i=0;i<N;i++){segA[i].classList.remove("hl");feldA[i].classList.remove("hl");segI[i].classList.remove("hl");}}
+function markiere(j){
+  aus();
+  var pos=((j-versatz())%N+N)%N;
+  segI[j].classList.add("hl");segA[pos].classList.add("hl");feldA[pos].classList.add("hl");
+}
+function stopAnim(){if(anim){cancelAnimationFrame(anim);anim=null;}}
+function dreheZu(ziel,dauer){
+  stopAnim();
+  if(ruhig||dauer<=0){setze(ziel);return;}
+  var von=winkel,t0=null;
+  function schritt(ts){
+    if(t0===null)t0=ts;
+    var k=Math.min(1,(ts-t0)/dauer),e=1-Math.pow(1-k,3);
+    setze(von+(ziel-von)*e);
+    if(k<1)anim=requestAnimationFrame(schritt);else{anim=null;setze(ziel);}
+  }
+  anim=requestAnimationFrame(schritt);
+}
+function einrasten(){dreheZu(Math.round(winkel/STEP)*STEP,120);}
+function aufIndex(k){
+  aus();
+  var ziel=-k*STEP;
+  var d=((ziel-winkel)%360+540)%360-180;
+  dreheZu(winkel+d,350);
+}
+
+var tasten=document.getElementById("tasten");
+AUSSEN.forEach(function(b){
+  var btn=document.createElement("button");
+  btn.type="button";btn.textContent=b;btn.setAttribute("data-taste",b);
+  btn.addEventListener("click",function(){aufIndex(INNEN.indexOf(b));});
+  tasten.appendChild(btn);
+});
+document.getElementById("start").addEventListener("click",function(){aufIndex(0);});
+
+var knopf=document.getElementById("ansicht"),v3=document.getElementById("v3"),vf=document.getElementById("vf");
+function ansicht(drei){
+  neigung=drei?NEIGUNG:0;
+  buehne.classList.toggle("flach",!drei);
+  knopf.setAttribute("aria-pressed",drei?"true":"false");
+  v3.className=drei?"an":"aus";vf.className=drei?"aus":"an";
+}
+knopf.addEventListener("click",function(){ansicht(neigung===0);});
+ansicht(true);
+
+// Winkel in der Scheibenebene: Bildschirmpunkt zurück auf die geneigte Ebene projizieren
+function punktWinkel(e){
+  var r=buehne.getBoundingClientRect();
+  var sx=e.clientX-(r.left+r.width/2),sy=e.clientY-(r.top+r.height/2);
+  var t=neigung*Math.PI/180,c=Math.cos(t),s=Math.sin(t);
+  var y=sy*PERSP/(c*PERSP+sy*s);
+  var x=sx*(PERSP-y*s)/PERSP;
+  return Math.atan2(y,x)*180/Math.PI;
+}
+var zug=null;
+buehne.addEventListener("pointerdown",function(e){
+  if(e.button!==undefined&&e.button>0)return;
+  e.preventDefault();
+  stopAnim();
+  var feld=e.target.closest?e.target.closest("[data-i]"):null;
+  zug={id:e.pointerId,a:punktWinkel(e),start:winkel,summe:0,feld:feld?+feld.getAttribute("data-i"):-1};
+  try{buehne.setPointerCapture(e.pointerId);}catch(x){}
+  buehne.classList.add("zieht");
+});
+buehne.addEventListener("pointermove",function(e){
+  if(!zug||e.pointerId!==zug.id)return;
+  e.preventDefault();
+  var a=punktWinkel(e),d=a-zug.a;
+  if(d>180)d-=360;if(d<-180)d+=360;
+  zug.a=a;zug.summe+=d;
+  if(Math.abs(zug.summe)>3)aus();
+  setze(winkel+d);
+});
+function ende(e){
+  if(!zug||e.pointerId!==zug.id)return;
+  var z=zug;zug=null;
+  buehne.classList.remove("zieht");
+  if(Math.abs(z.summe)<=3){
+    setze(z.start);
+    if(z.feld>=0)markiere(z.feld);else aus();
+  }else einrasten();
+}
+buehne.addEventListener("pointerup",ende);
+buehne.addEventListener("pointercancel",ende);
+buehne.addEventListener("touchmove",function(e){e.preventDefault();},{passive:false});
+
+setze(0);
+})();
+</script>
+</body>
+</html>
