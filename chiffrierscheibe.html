@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>Chiffrierscheibe</title>
+<style>
+:root{--creme:#F3ECDD;--blau:#1F2F4F;--schwarz:#111;--hl:#B5482A;--linie:#8a7f6a}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--creme);color:var(--schwarz)}
+body{font-family:"Courier New",Courier,monospace;-webkit-text-size-adjust:100%;overflow-x:hidden}
+main{max-width:560px;margin:0 auto;padding:16px 16px 32px}
+header{border-bottom:1px solid var(--schwarz);padding-bottom:8px;margin-bottom:16px}
+.az{font-size:13px;letter-spacing:.03em;margin:0}
+h1{font-size:20px;font-weight:bold;margin:6px 0 0;letter-spacing:.04em}
+.scheibe{display:block;width:100%;max-width:460px;height:auto;margin:0 auto;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;cursor:grab}
+.scheibe.zieht{cursor:grabbing}
+.scheibe text{font-family:"Courier New",Courier,monospace;font-weight:bold;fill:var(--creme);text-anchor:middle;dominant-baseline:central;pointer-events:none}
+.seg{stroke:var(--creme);stroke-width:.8}
+.aussen .seg{fill:var(--blau)}
+.innen .seg{fill:var(--schwarz)}
+.seg.hl{fill:var(--hl)}
+h2{font-size:15px;font-weight:bold;margin:20px 0 8px;letter-spacing:.02em}
+.tasten{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.tasten button,.start{font-family:"Courier New",Courier,monospace;font-weight:bold;font-size:20px;min-height:48px;min-width:44px;background:var(--creme);color:var(--blau);border:1px solid var(--blau);border-radius:2px;padding:0;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.tasten button:active,.start:active{background:var(--blau);color:var(--creme)}
+.start{display:block;width:100%;margin-top:14px;font-size:17px}
+.anl{font-size:14px;margin:20px 0 0;border-top:1px solid var(--linie);padding-top:10px}
+@media (min-width:600px){.tasten{grid-template-columns:repeat(9,1fr)}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<p class="az">SoKo Rabenstein, Az. 24/2026, Kalender B, Tag 16</p>
+<h1>Chiffrierscheibe (Nachbildung)</h1>
+</header>
+<svg id="scheibe" class="scheibe" viewBox="0 0 400 400" role="img" aria-label="Chiffrierscheibe">
+<circle cx="200" cy="200" r="199" fill="none" stroke="#111" stroke-width="1"/>
+<g id="aussen" class="aussen"></g>
+<g id="innen" class="innen"></g>
+<circle cx="200" cy="200" r="96" fill="#F3ECDD" stroke="#111" stroke-width="1"/>
+<circle cx="200" cy="200" r="4" fill="#1F2F4F"/>
+</svg>
+<h2>Diesen Buchstaben unter das A drehen</h2>
+<div class="tasten" id="tasten"></div>
+<button type="button" class="start" id="start">Zurück auf Start</button>
+<p class="anl">Anleitung: siehe Türchen 16.</p>
+</main>
+<script>
+(function(){
+var NS="http://www.w3.org/2000/svg";
+var AUSSEN="ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+var INNEN="VBNMKLJUIYDHOPXZGTRFEWQASC".split("");
+var N=26,STEP=360/N,C=200;
+var svg=document.getElementById("scheibe");
+var gA=document.getElementById("aussen");
+var gI=document.getElementById("innen");
+var winkel=0; // Drehung des Innenrings in Grad, positiv = Uhrzeigersinn
+var segA=[],segI=[],anim=null;
+
+function pol(r,a){var t=(a-90)*Math.PI/180;return [C+r*Math.cos(t),C+r*Math.sin(t)];}
+function sektor(r1,r2,a1,a2){
+  var p1=pol(r2,a1),p2=pol(r2,a2),p3=pol(r1,a2),p4=pol(r1,a1);
+  return "M"+p1+"A"+r2+","+r2+" 0 0 1 "+p2+"L"+p3+"A"+r1+","+r1+" 0 0 0 "+p4+"Z";
+}
+function ring(g,buchst,r1,r2,fs,liste,typ){
+  for(var i=0;i<N;i++){
+    var f=document.createElementNS(NS,"g");
+    f.setAttribute("data-"+typ,i);
+    f.setAttribute("data-b",buchst[i]);
+    var p=document.createElementNS(NS,"path");
+    p.setAttribute("d",sektor(r1,r2,i*STEP-STEP/2,i*STEP+STEP/2));
+    p.setAttribute("class","seg");
+    var t=document.createElementNS(NS,"text");
+    t.setAttribute("x",C);t.setAttribute("y",C-(r1+r2)/2);
+    t.setAttribute("font-size",fs);
+    t.setAttribute("transform","rotate("+(i*STEP)+" "+C+" "+C+")");
+    t.textContent=buchst[i];
+    f.appendChild(p);f.appendChild(t);g.appendChild(f);
+    liste.push(p);
+  }
+}
+ring(gA,AUSSEN,150,198,26,segA,"a");
+ring(gI,INNEN,98,150,24,segI,"i");
+
+function setze(w){winkel=w;gI.setAttribute("transform","rotate("+w+" "+C+" "+C+")");}
+function versatz(){return ((Math.round(-winkel/STEP)%N)+N)%N;} // Index des Innenfelds unter A
+function aus(){for(var i=0;i<N;i++){segA[i].classList.remove("hl");segI[i].classList.remove("hl");}}
+function markiere(j){
+  aus();
+  var pos=((j-versatz())%N+N)%N;
+  segI[j].classList.add("hl");segA[pos].classList.add("hl");
+}
+function stopAnim(){if(anim){cancelAnimationFrame(anim);anim=null;}}
+function dreheZu(ziel,dauer){
+  stopAnim();
+  var von=winkel,t0=null;
+  if(dauer<=0){setze(ziel);return;}
+  function schritt(ts){
+    if(t0===null)t0=ts;
+    var k=Math.min(1,(ts-t0)/dauer),e=1-Math.pow(1-k,3);
+    setze(von+(ziel-von)*e);
+    if(k<1)anim=requestAnimationFrame(schritt);else{anim=null;setze(ziel);}
+  }
+  anim=requestAnimationFrame(schritt);
+}
+function einrasten(){dreheZu(Math.round(winkel/STEP)*STEP,120);}
+function aufIndex(k){
+  aus();
+  var ziel=-k*STEP;
+  var d=((ziel-winkel)%360+540)%360-180; // kürzester Weg
+  dreheZu(winkel+d,350);
+}
+
+var tasten=document.getElementById("tasten");
+AUSSEN.forEach(function(b){
+  var btn=document.createElement("button");
+  btn.type="button";btn.textContent=b;btn.setAttribute("data-taste",b);
+  btn.addEventListener("click",function(){aufIndex(INNEN.indexOf(b));});
+  tasten.appendChild(btn);
+});
+document.getElementById("start").addEventListener("click",function(){aufIndex(0);});
+
+// Ziehen
+var zug=null;
+function punktWinkel(e){
+  var r=svg.getBoundingClientRect();
+  var x=e.clientX-(r.left+r.width/2),y=e.clientY-(r.top+r.height/2);
+  return Math.atan2(y,x)*180/Math.PI;
+}
+svg.addEventListener("pointerdown",function(e){
+  if(e.button!==undefined&&e.button>0)return;
+  e.preventDefault();
+  stopAnim();
+  var feld=e.target.closest?e.target.closest("[data-i]"):null;
+  zug={id:e.pointerId,a:punktWinkel(e),start:winkel,summe:0,feld:feld?+feld.getAttribute("data-i"):-1};
+  try{svg.setPointerCapture(e.pointerId);}catch(x){}
+  svg.classList.add("zieht");
+});
+svg.addEventListener("pointermove",function(e){
+  if(!zug||e.pointerId!==zug.id)return;
+  e.preventDefault();
+  var a=punktWinkel(e),d=a-zug.a;
+  if(d>180)d-=360;if(d<-180)d+=360;
+  zug.a=a;zug.summe+=d;
+  if(Math.abs(zug.summe)>3)aus();
+  setze(winkel+d);
+});
+function ende(e){
+  if(!zug||e.pointerId!==zug.id)return;
+  var z=zug;zug=null;
+  svg.classList.remove("zieht");
+  if(Math.abs(z.summe)<=3){
+    setze(z.start);
+    if(z.feld>=0)markiere(z.feld);else aus();
+  }else einrasten();
+}
+svg.addEventListener("pointerup",ende);
+svg.addEventListener("pointercancel",ende);
+svg.addEventListener("touchmove",function(e){e.preventDefault();},{passive:false});
+
+setze(0);
+})();
+</script>
+</body>
+</html>
