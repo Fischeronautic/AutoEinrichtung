@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>Chiffrierscheibe</title>
+<style>
+:root{--creme:#F3ECDD;--blau:#1F2F4F;--hl:#B5482A}
+*{box-sizing:border-box}
+html{background:#211810}
+html,body{margin:0;padding:0}
+body{min-height:100vh;color:#EDE3CC;font-family:"Courier New",Courier,monospace;-webkit-text-size-adjust:100%;overflow-x:hidden;
+ background:radial-gradient(ellipse 100% 70% at 50% 30%,#4e3b28 0%,#3a2b1d 55%,#211810 100%)}
+main{max-width:560px;margin:0 auto;padding:16px 16px 32px}
+header{border-bottom:1px solid rgba(237,227,204,.45);padding-bottom:8px;margin-bottom:12px}
+.az{font-size:13px;letter-spacing:.03em;margin:0}
+h1{font-size:20px;font-weight:bold;margin:6px 0 0;letter-spacing:.04em}
+
+/* Bühne: Perspektive und Ausschnitt (selbst nicht Teil des 3D-Kontexts) */
+.buehne{position:relative;width:100%;max-width:520px;margin:0 auto;overflow:hidden;border-radius:6px;background:#2a1d12;
+ -webkit-perspective:700px;perspective:700px;-webkit-perspective-origin:50% 50%;perspective-origin:50% 50%;
+ touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;cursor:grab;
+ box-shadow:0 0 0 1px rgba(0,0,0,.5)}
+.buehne::before{content:"";display:block;padding-top:100%}
+.buehne::after{content:"";position:absolute;inset:0;pointer-events:none;
+ background:radial-gradient(ellipse 75% 70% at 50% 52%,rgba(0,0,0,0) 55%,rgba(0,0,0,.55) 100%)}
+.buehne.zieht{cursor:grabbing}
+.kipp{position:absolute;inset:0;-webkit-transform-style:preserve-3d;transform-style:preserve-3d;transform-origin:50% 50%;pointer-events:none;
+ --gx:0%;--gy:0%;--td:500ms}
+.tisch{position:absolute;left:calc(50% - 560px);top:calc(50% - 900px);width:1120px;height:1220px;transform:translateZ(-2px);
+ background:
+  linear-gradient(to bottom,rgba(10,6,3,.82) 0%,rgba(10,6,3,.45) 35%,rgba(10,6,3,.12) 62%,rgba(10,6,3,0) 75%),
+  repeating-linear-gradient(1.2deg,rgba(255,220,170,0) 0 9px,rgba(255,220,170,.05) 9px 11px,rgba(0,0,0,0) 11px 23px,rgba(0,0,0,.10) 23px 25px),
+  repeating-linear-gradient(-.6deg,rgba(0,0,0,0) 0 37px,rgba(0,0,0,.13) 37px 41px,rgba(255,230,190,.04) 41px 44px,rgba(0,0,0,0) 44px 71px),
+  linear-gradient(to right,#5b3f26,#6d4c2e 30%,#634429 55%,#704f30 80%,#5a3e25)}
+.l{position:absolute;left:6%;top:6%;width:88%;height:88%;border-radius:50%}
+.li{left:16.78%;top:16.78%;width:66.44%;height:66.44%}
+.rv{left:46.7%;top:46.7%;width:6.6%;height:6.6%}
+.schatten{background:radial-gradient(closest-side,rgba(0,0,0,.62) 62%,rgba(0,0,0,.3) 84%,rgba(0,0,0,0) 100%);
+ transition:transform var(--td) ease}
+.schatten.scharf{background:radial-gradient(closest-side,rgba(0,0,0,.6) 90%,rgba(0,0,0,0) 100%)}
+.messing{background:
+ radial-gradient(circle at 30% 24%,rgba(255,250,225,.28),rgba(255,250,225,0) 42%),
+ repeating-conic-gradient(from 0deg,rgba(255,255,255,.06) 0deg .5deg,rgba(0,0,0,.06) .5deg 1.1deg),
+ conic-gradient(from 0deg,#c9a24f 0deg,#a98634 45deg,#c9a24f 90deg,#dcbc6c 135deg,#c09a48 180deg,#97762b 225deg,#c9a24f 270deg,#f2db96 315deg,#c9a24f 360deg);
+ box-shadow:inset 2px 2px 2px rgba(255,248,215,.55),inset -2px -2px 3px rgba(40,28,8,.55)}
+.messing::before{content:"";position:absolute;left:9%;top:9%;width:82%;height:82%;border-radius:50%;
+ background:radial-gradient(closest-side,rgba(0,0,0,.5) 88%,rgba(0,0,0,0) 100%);transform:translate(2.2%,3.2%)}
+.messing::after,.glanzI{content:"";position:absolute;inset:0;border-radius:50%;pointer-events:none;
+ background:radial-gradient(ellipse 26% 26% at 32% 26%,rgba(255,255,255,.34),rgba(255,255,255,0)),
+  radial-gradient(ellipse 30% 30% at 74% 80%,rgba(0,0,0,.14),rgba(0,0,0,0));
+ transform:translate(var(--gx),var(--gy));transition:transform var(--td) ease}
+.glanzI{left:16.78%;top:16.78%;right:auto;bottom:auto;width:66.44%;height:66.44%;transform:translateZ(22.05px) translate(var(--gx),var(--gy))}
+.email{background:radial-gradient(circle,#24365c 0%,#1F2F4F 60%,#18253f 96.6%,#e9cd80 97%,#b8913f 98.6%,#6e5320 100%)}
+svg.fl{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.fl text{font-family:"Courier New",Courier,monospace;font-weight:bold;font-size:40px;text-anchor:middle;dominant-baseline:central}
+.ta{fill:#2a1c06}
+.ta-k{fill:rgba(255,244,205,.85)}
+.ti{fill:#EFE4C6;stroke:rgba(5,10,22,.85);stroke-width:1.6px;paint-order:stroke;stroke-linejoin:round}
+.fl text.hl{fill:#FBF5E8}
+.hlw{fill:var(--hl)}
+.teilA{fill:none;stroke:rgba(55,36,8,.6);stroke-width:.9}
+.teilI{fill:none;stroke:#3a5185;stroke-width:.9}
+.kappe{background:radial-gradient(circle at 35% 30%,#fbeab0,#c79f4b 55%,#6e5018);box-shadow:inset -1px -1px 1px rgba(0,0,0,.4)}
+.kappe::after{content:"";position:absolute;left:16%;right:16%;top:44%;height:12%;border-radius:2px;background:#2a1d08;
+ box-shadow:0 1px 0 rgba(255,240,190,.75);transform:rotate(-35deg)}
+
+.lupe{min-height:96px;margin:10px 0 0;padding:8px 12px;border:1px solid rgba(237,227,204,.4);border-radius:3px;background:#F3ECDD;color:#1F2F4F;
+ font-size:32px;font-weight:bold;line-height:1.25;text-align:center;display:flex;flex-wrap:wrap;justify-content:center;align-content:center;column-gap:.5em;visibility:hidden}
+.lupe.an{visibility:visible}
+.lupe b{color:var(--hl)}
+h2{font-size:15px;font-weight:bold;margin:14px 0 8px;letter-spacing:.02em}
+.tasten{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+button{font-family:"Courier New",Courier,monospace;font-weight:bold;min-height:48px;min-width:44px;padding:0 6px;font-size:16px;
+ background:linear-gradient(#F3ECDD,#E3D7BE);color:var(--blau);border:1px solid #17110a;border-radius:3px;box-shadow:0 2px 0 #17110a;
+ -webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.tasten button{font-size:20px;padding:0}
+button:active{background:var(--blau);color:var(--creme);transform:translateY(1px);box-shadow:0 1px 0 #17110a}
+.modus{display:grid;grid-template-columns:1fr 1fr 1fr;margin-top:12px;border:1px solid #17110a;border-radius:3px;overflow:hidden;box-shadow:0 2px 0 #17110a}
+.modus button{border:0;border-radius:0;box-shadow:none;border-left:1px solid #17110a}
+.modus button:first-child{border-left:0}
+.modus button[aria-pressed="true"]{background:var(--blau);color:var(--creme)}
+.reihe{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.reihe.eins{grid-template-columns:1fr}
+#handy[aria-pressed="true"]{background:var(--blau);color:var(--creme)}
+.anl{font-size:14px;margin:20px 0 0;border-top:1px solid rgba(237,227,204,.35);padding-top:10px}
+@media (min-width:600px){.tasten{grid-template-columns:repeat(9,1fr)}}
+@media (prefers-reduced-motion:reduce){.schatten,.messing::after,.glanzI{transition:none}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<p class="az">SoKo Rabenstein, Az. 24/2026, Kalender B, Tag 16</p>
+<h1>Chiffrierscheibe (Nachbildung)</h1>
+</header>
+<div class="buehne" id="buehne" role="img" aria-label="Chiffrierscheibe"><div class="kipp" id="kipp"></div></div>
+<div class="lupe" id="lupe" aria-live="polite"><span id="lu1"></span> <span id="lu2"></span></div>
+<div class="modus" role="group" aria-label="Ansicht">
+ <button type="button" data-m="tisch">Tisch</button><button type="button" data-m="schraeg">Schräg</button><button type="button" data-m="flach">Flach</button>
+</div>
+<h2>Diesen Buchstaben unter das A drehen</h2>
+<div class="tasten" id="tasten"></div>
+<div class="reihe" id="reihe">
+ <button type="button" id="start">Zurück auf Start</button>
+ <button type="button" id="handy" aria-pressed="false" hidden>Mit Handy kippen</button>
+</div>
+<p class="anl">Anleitung: siehe Türchen 16.</p>
+</main>
+<script>
+(function(){
+"use strict";
+var NS="http://www.w3.org/2000/svg";
+var AUSSEN="ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+var INNEN="VBNMKLJUIYDHOPXZGTRFEWQASC".split("");
+var N=26,STEP=360/N,C=200;
+var MODI={tisch:55,schraeg:28,flach:0},ZOOM={tisch:1.07,schraeg:1,flach:1},STRECK={tisch:1.45,schraeg:1.2,flach:1};
+var ZS=1.5,ZI=0.75,NA=12,NI=7;
+var H_A=(NA-1)*ZS;          // Oberfläche Außenring
+var H_I=H_A+NI*ZI;          // Oberfläche Innenring
+var ruhig=!!(window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches);
+var buehne=document.getElementById("buehne"),kipp=document.getElementById("kipp");
+var winkel=0,modus="tisch",pX=0,pY=0,dX=0,dY=0,streck=1;
+var aText=[],iText=[],aHl,iHl,email;
+
+function el(n,a,p){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e;}
+function div(cls,z,p){var d=document.createElement("div");d.className=cls;if(z!==null)d.style.transform="translateZ("+z+"px)";(p||kipp).appendChild(d);return d;}
+function pol(r,a){var t=(a-90)*Math.PI/180;return [(C+r*Math.cos(t)).toFixed(2),(C+r*Math.sin(t)).toFixed(2)];}
+function sektor(r1,r2,i){
+  var a1=i*STEP-STEP/2,a2=i*STEP+STEP/2,p1=pol(r2,a1),p2=pol(r2,a2),p3=pol(r1,a2),p4=pol(r1,a1);
+  return "M"+p1+"A"+r2+","+r2+" 0 0 1 "+p2+"L"+p3+"A"+r1+","+r1+" 0 0 0 "+p4+"Z";
+}
+function teiler(r1,r2){var d="";for(var i=0;i<N;i++){var a=i*STEP-STEP/2;d+="M"+pol(r1,a)+"L"+pol(r2,a);}return d;}
+function hex(h){return [parseInt(h.substr(1,2),16),parseInt(h.substr(3,2),16),parseInt(h.substr(5,2),16)];}
+function mix(a,b,t,f){a=hex(a);b=hex(b);return "rgb("+[0,1,2].map(function(i){return Math.max(0,Math.min(255,Math.round((a[i]+(b[i]-a[i])*t)*f)));}).join(",")+")";}
+function wand(a,b,t){return "linear-gradient(115deg,"+mix(a,b,t,1.25)+","+mix(a,b,t,1)+" 50%,"+mix(a,b,t,.7)+")";}
+
+// Szene
+div("tisch",null);
+var schatten=div("l schatten",null);
+for(var i=0;i<NA-1;i++)div("l",i*ZS).style.background=wand("#2e2109","#b08a3a",i/(NA-2));
+var messing=div("l messing",H_A);
+var sA=el("svg",{"class":"fl",viewBox:"0 0 400 400","aria-hidden":"true"},messing);
+var kopie=el("use",{"class":"ta-k",transform:"translate(.8 1)",href:"#aT"},sA);
+aHl=el("path",{"class":"hlw",display:"none"},sA);
+el("path",{"class":"teilA",d:teiler(151,198)},sA);
+var gA=el("g",{"class":"ta"},sA),gAT=el("g",{id:"aT"},gA);
+for(i=0;i<NI-1;i++)div("l li",H_A+(i+1)*ZI).style.background=wand("#3b2b0e","#c09a48",i/(NI-2));
+email=div("l li email",null);
+var sI=el("svg",{"class":"fl",viewBox:"49 49 302 302","aria-hidden":"true"},email);
+iHl=el("path",{"class":"hlw",display:"none"},sI);
+el("path",{"class":"teilI",d:teiler(98.5,149)+"M200,102A98,98 0 1 1 199.9,102"},sI);
+var gI=el("g",{"class":"ti"},sI);
+div("l li glanzI",null);
+div("l rv",H_I+ZS).style.background="#5e461a";
+div("l rv",H_I+2*ZS).style.background="#8a6a2a";
+div("l rv kappe",H_I+3*ZS);
+for(i=0;i<N;i++){
+  var t=el("text",{x:0,y:0,"data-b":AUSSEN[i],"data-a":i},gAT);t.textContent=AUSSEN[i];aText.push(t);
+  var u=el("text",{x:0,y:0,"data-b":INNEN[i],"data-i":i},gI);u.textContent=INNEN[i];iText.push(u);
+}
+function setzeStreck(s){
+  streck=s;
+  for(var i=0;i<N;i++){
+    var r="rotate("+(i*STEP)+" "+C+" "+C+") translate("+C+" ";
+    aText[i].setAttribute("transform",r+(C-177)+") scale(.88 "+s.toFixed(3)+")");
+    iText[i].setAttribute("transform",r+(C-124)+") scale(.88 "+s.toFixed(3)+")");
+  }
+}
+
+// Drehen
+var feldNr=0,vib=false;
+function setze(w){
+  winkel=w;
+  email.style.transform="translateZ("+H_I+"px) rotate("+w+"deg)";
+  var f=Math.round(w/STEP);
+  if(f!==feldNr){feldNr=f;if(vib&&navigator.vibrate){try{navigator.vibrate(8);}catch(x){}}}
+}
+function versatz(){return ((Math.round(-winkel/STEP)%N)+N)%N;}
+var lupe=document.getElementById("lupe"),lu1=document.getElementById("lu1"),lu2=document.getElementById("lu2");
+function aus(){
+  aHl.setAttribute("display","none");iHl.setAttribute("display","none");
+  for(var i=0;i<N;i++){aText[i].classList.remove("hl");iText[i].classList.remove("hl");}
+  lupe.classList.remove("an");lu1.textContent="";lu2.textContent="";
+}
+function markiere(j){
+  aus();
+  var pos=((j-versatz())%N+N)%N;
+  iHl.setAttribute("d",sektor(98.5,149,j));iHl.removeAttribute("display");
+  aHl.setAttribute("d",sektor(151,198,pos));aHl.removeAttribute("display");
+  iText[j].classList.add("hl");aText[pos].classList.add("hl");
+  lu1.textContent="Innen "+INNEN[j]+",";lu2.textContent="außen darüber "+AUSSEN[pos];
+  lupe.classList.add("an");
+}
+
+var anim=null,zust=null,tLetzt=0;
+function stopAnim(){if(anim)cancelAnimationFrame(anim);anim=null;zust=null;vib=false;email.style.willChange="";}
+function starte(z){
+  zust=z;email.style.willChange="transform";
+  if(!anim){tLetzt=0;anim=requestAnimationFrame(tick);}
+}
+function ende(w){setze(w);anim=null;zust=null;vib=false;email.style.willChange="";}
+function tick(ts){
+  var dt=tLetzt?Math.min(50,ts-tLetzt):16;tLetzt=ts;var z=zust;
+  if(!z){anim=null;return;}
+  if(z.typ==="ease"){
+    if(z.t0===undefined)z.t0=ts;
+    var k=Math.min(1,(ts-z.t0)/z.dauer),e=1-Math.pow(1-k,3);
+    if(k>=1)return ende(z.ziel);
+    setze(z.von+(z.ziel-z.von)*e);
+  }else if(z.typ==="traeg"){
+    z.v*=Math.exp(-dt/320);
+    setze(winkel+z.v*dt);
+    if(Math.abs(z.v)<0.03){z.typ="feder";z.ziel=Math.round((winkel+z.v*90)/STEP)*STEP;}
+  }else{ // Feder mit leichtem Überschwingen
+    var w=winkel,v=z.v,om=0.018,ze=0.45;
+    for(var s=0;s<dt;s+=2){var h=Math.min(2,dt-s);v+=(-om*om*(w-z.ziel)-2*ze*om*v)*h;w+=v*h;}
+    z.v=v;
+    if(Math.abs(w-z.ziel)<0.02&&Math.abs(v)<0.0005)return ende(z.ziel);
+    setze(w);
+  }
+  anim=requestAnimationFrame(tick);
+}
+function einrasten(v){
+  if(ruhig){setze(Math.round(winkel/STEP)*STEP);return;}
+  if(Math.abs(v)>0.05){vib=true;starte({typ:"traeg",v:v});}
+  else starte({typ:"feder",v:v,ziel:Math.round(winkel/STEP)*STEP});
+}
+function aufIndex(k){
+  stopAnim();aus();
+  var ziel=-k*STEP,d=((ziel-winkel)%360+540)%360-180;
+  if(ruhig){setze(winkel+d);return;}
+  starte({typ:"ease",von:winkel,ziel:winkel+d,dauer:350});
+}
+
+// Neigung, Licht, Schatten
+var tdTimer=null;
+function neige(dauer){
+  var th=MODI[modus]+pY+dX,ph=pX+dY;
+  if(ruhig)dauer=0;
+  kipp.style.setProperty("--td",dauer+"ms");
+  kipp.style.transition=dauer?"transform "+dauer+"ms ease":"none";
+  kipp.style.willChange="transform";
+  clearTimeout(tdTimer);tdTimer=setTimeout(function(){kipp.style.willChange="";},dauer+80);
+  kipp.style.transform="scale("+ZOOM[modus]+") rotateX("+th.toFixed(2)+"deg) rotateY("+ph.toFixed(2)+"deg)";
+  kipp.style.setProperty("--gx",(-ph*0.45).toFixed(2)+"%");
+  kipp.style.setProperty("--gy",(-(th-28)*0.06).toFixed(2)+"%");
+  var q=Math.max(0,th)/55;
+  schatten.classList.toggle("scharf",th<12);
+  schatten.style.transform="translateZ(-1px) translate("+(1+q*2.6+ph*0.15).toFixed(2)+"%,"+(1.4+q*4.2).toFixed(2)+"%) scale("+(1+q*0.06).toFixed(3)+")";
+}
+var sAnim=null;
+function streckeZu(ziel,dauer){
+  if(sAnim)cancelAnimationFrame(sAnim);
+  if(ruhig||!dauer){setzeStreck(ziel);return;}
+  var von=streck,t0=null;
+  (function f(ts){if(t0===null)t0=ts;var k=Math.min(1,(ts-t0)/dauer),e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;
+    setzeStreck(von+(ziel-von)*e);if(k<1)sAnim=requestAnimationFrame(f);else sAnim=null;})(performance.now());
+}
+var mKn=document.querySelectorAll(".modus button");
+function setzeModus(m,dauer){
+  modus=m;
+  for(var i=0;i<mKn.length;i++)mKn[i].setAttribute("aria-pressed",mKn[i].getAttribute("data-m")===m?"true":"false");
+  neige(dauer);streckeZu(STRECK[m],dauer);
+}
+for(i=0;i<mKn.length;i++)mKn[i].addEventListener("click",function(){setzeModus(this.getAttribute("data-m"),500);});
+
+// Strahl-Ebene-Schnitt: Bildschirmpunkt -> Punkt auf der Oberfläche des Innenrings
+function ebene(e){
+  var r=buehne.getBoundingClientRect();
+  var P=parseFloat(getComputedStyle(buehne).perspective)||700;
+  var sx=e.clientX-(r.left+r.width/2),sy=e.clientY-(r.top+r.height/2);
+  var tf=getComputedStyle(kipp).transform,m=(tf&&tf!=="none")?new DOMMatrix(tf):new DOMMatrix();
+  var inv=m.inverse();
+  var A=inv.transformPoint(new DOMPoint(0,0,P,1)),B=inv.transformPoint(new DOMPoint(sx,sy,0,1));
+  A={x:A.x/A.w,y:A.y/A.w,z:A.z/A.w};B={x:B.x/B.w,y:B.y/B.w,z:B.z/B.w};
+  var d=B.z-A.z,t=Math.abs(d)<1e-9?1:(H_I-A.z)/d;
+  var x=A.x+t*(B.x-A.x),y=A.y+t*(B.y-A.y);
+  var einh=kipp.clientWidth*0.88/400;
+  return {a:Math.atan2(y,x)*180/Math.PI,r:Math.sqrt(x*x+y*y)/einh};
+}
+var zug=null;
+buehne.addEventListener("pointerdown",function(e){
+  if(e.button!==undefined&&e.button>0)return;
+  e.preventDefault();
+  stopAnim();
+  var p=ebene(e),feld=-1;
+  if(p.r>=98&&p.r<=151)feld=((Math.round((p.a+90-winkel)/STEP)%N)+N)%N;
+  var jetzt=performance.now();
+  zug={id:e.pointerId,a:p.a,start:winkel,summe:0,feld:feld,hist:[{t:jetzt,w:winkel}]};
+  try{buehne.setPointerCapture(e.pointerId);}catch(x){}
+  buehne.classList.add("zieht");email.style.willChange="transform";vib=true;
+});
+buehne.addEventListener("pointermove",function(e){
+  if(!zug){
+    if(e.pointerType==="mouse"&&fein){
+      var r=buehne.getBoundingClientRect();
+      pX=((e.clientX-r.left)/r.width-.5)*12;pY=-((e.clientY-r.top)/r.height-.5)*12;neige(140);
+    }
+    return;
+  }
+  if(e.pointerId!==zug.id)return;
+  e.preventDefault();
+  var a=ebene(e).a,d=a-zug.a;
+  if(d>180)d-=360;if(d<-180)d+=360;
+  zug.a=a;zug.summe+=d;
+  if(Math.abs(zug.summe)>3)aus();
+  setze(winkel+d);
+  var jetzt=performance.now();zug.hist.push({t:jetzt,w:winkel});
+  while(zug.hist.length>2&&jetzt-zug.hist[0].t>100)zug.hist.shift();
+});
+function los(e){
+  if(!zug||e.pointerId!==zug.id)return;
+  var z=zug;zug=null;vib=false;
+  buehne.classList.remove("zieht");
+  if(Math.abs(z.summe)<=3){
+    setze(z.start);email.style.willChange="";
+    if(z.feld>=0)markiere(z.feld);else aus();
+    return;
+  }
+  var jetzt=performance.now(),h=z.hist,v=0,l=h[h.length-1];
+  if(jetzt-l.t<60){
+    var f=h[0];for(var i=0;i<h.length;i++)if(l.t-h[i].t<=80){f=h[i];break;}
+    if(l.t-f.t>8)v=(l.w-f.w)/(l.t-f.t);
+  }
+  if(e.type==="pointercancel")v=0;
+  einrasten(v);
+}
+buehne.addEventListener("pointerup",los);
+buehne.addEventListener("pointercancel",los);
+buehne.addEventListener("pointerleave",function(e){if(!zug&&e.pointerType==="mouse"&&fein&&(pX||pY)){pX=0;pY=0;neige(400);}});
+buehne.addEventListener("touchmove",function(e){e.preventDefault();},{passive:false});
+var fein=!!(window.matchMedia&&matchMedia("(hover: hover) and (pointer: fine)").matches);
+
+// Tasten
+var tasten=document.getElementById("tasten");
+AUSSEN.forEach(function(b){
+  var btn=document.createElement("button");
+  btn.type="button";btn.textContent=b;btn.setAttribute("data-taste",b);
+  btn.addEventListener("click",function(){aufIndex(INNEN.indexOf(b));});
+  tasten.appendChild(btn);
+});
+document.getElementById("start").addEventListener("click",function(){aufIndex(0);});
+
+// Mit Handy kippen
+var handy=document.getElementById("handy"),reihe=document.getElementById("reihe"),hAn=false,basis=null,hTimer=null,hRaf=null;
+function handyWeg(){hAn=false;window.removeEventListener("deviceorientation",lage);dX=0;dY=0;neige(300);handy.hidden=true;reihe.classList.add("eins");}
+function lage(e){
+  if(e.beta===null||e.gamma===null)return;
+  clearTimeout(hTimer);
+  if(!basis)basis={b:e.beta,g:e.gamma};
+  dX=Math.max(-8,Math.min(8,(e.beta-basis.b)*0.5));
+  dY=Math.max(-8,Math.min(8,(e.gamma-basis.g)*0.5));
+  if(!hRaf)hRaf=requestAnimationFrame(function(){hRaf=null;if(hAn)neige(90);});
+}
+function handyStart(){
+  hAn=true;basis=null;handy.setAttribute("aria-pressed","true");
+  window.addEventListener("deviceorientation",lage);
+  hTimer=setTimeout(function(){if(!basis)handyWeg();},2000);
+}
+if("DeviceOrientationEvent" in window&&window.matchMedia&&matchMedia("(pointer: coarse)").matches){
+  handy.hidden=false;
+  handy.addEventListener("click",function(){
+    if(hAn){hAn=false;window.removeEventListener("deviceorientation",lage);handy.setAttribute("aria-pressed","false");dX=0;dY=0;neige(300);return;}
+    var D=window.DeviceOrientationEvent;
+    if(typeof D.requestPermission==="function"){
+      D.requestPermission().then(function(s){if(s==="granted")handyStart();else handyWeg();}).catch(handyWeg);
+    }else handyStart();
+  });
+}else reihe.classList.add("eins");
+
+// Start
+setze(0);
+if(ruhig){setzeModus("tisch",0);}
+else{
+  modus="tisch";
+  for(i=0;i<mKn.length;i++)mKn[i].setAttribute("aria-pressed",mKn[i].getAttribute("data-m")==="tisch"?"true":"false");
+  kipp.style.transition="none";kipp.style.transform="rotateX(20deg)";setzeStreck(1.15);
+  void kipp.offsetWidth;
+  requestAnimationFrame(function(){requestAnimationFrame(function(){neige(900);streckeZu(STRECK.tisch,900);});});
+}
+})();
+</script>
+</body>
+</html>
